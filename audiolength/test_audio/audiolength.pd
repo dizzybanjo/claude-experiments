@@ -1,0 +1,18 @@
+#N canvas 1068 398 550 537 12;
+#X obj 55 202 unpack f s f;
+#X obj 244 116 text define -k audio_lengths;
+#A set 1 long.wav 10500 \; 2 medium.aif 2000 \; 3 medium.wav 2000 \; 4 short.wav 500 \;;
+#X msg 244 89 read audio_lengths.txt;
+#X obj 55 177 text get audio_lengths;
+#X obj 54 149 text search audio_lengths 1;
+#X obj 134 232 outlet;
+#X obj 53 99 inlet;
+#X obj 53 123 symbol;
+#X obj 245 63 loadbang;
+#X connect 0 2 5 0;
+#X connect 2 0 1 0;
+#X connect 3 0 0 0;
+#X connect 4 0 3 0;
+#X connect 6 0 7 0;
+#X connect 7 0 4 0;
+#X connect 8 0 2 0;

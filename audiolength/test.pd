@@ -1,0 +1,8 @@
+#N canvas 146 320 450 300 12;
+#X declare path test_audio;
+#X obj 85 144 audiolength;
+#X msg 185 114 short;
+#X floatatom 85 168 5 0 0 0 - - - 0;
+#X obj 63 78 declare path test_audio;
+#X connect 0 0 2 0;
+#X connect 1 0 0 0;

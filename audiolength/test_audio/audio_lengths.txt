@@ -1,0 +1,4 @@
+1 long.wav 10500.0;
+2 medium.aif 2000.0;
+3 medium.wav 2000.0;
+4 short.wav 500.0;

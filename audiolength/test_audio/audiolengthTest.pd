@@ -1,0 +1,10 @@
+#N canvas 614 636 450 300 12;
+#X obj 56 149 audiolength;
+#X floatatom 56 173 5 0 0 0 - - - 0;
+#X msg 55 81 symbol long.wav;
+#X msg 263 93 symbol short.wav;
+#X msg 191 56 symbol medium.wav;
+#X connect 0 0 1 0;
+#X connect 2 0 0 0;
+#X connect 3 0 0 0;
+#X connect 4 0 0 0;
