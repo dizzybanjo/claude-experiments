@@ -7,16 +7,22 @@ Pure Data loads abstractions by filename. On case-sensitive filesystems (Linux),
 ## Usage
 
 ```
-python3 pd_cap_check.py <project_folder> <library_folder>
+python3 pd_cap_check.py <project_folder> <library_folder> [<library_folder2> ...]
 ```
 
 - `<project_folder>` — the folder containing your `.pd` patches (scanned recursively)
-- `<library_folder>` — the folder containing your abstraction `.pd` files (scanned recursively)
+- `<library_folder>` — one or more folders containing abstraction `.pd` files (each scanned recursively)
 
-### Example
+### Examples
 
+Single library:
 ```
 python3 pd_cap_check.py project library
+```
+
+Multiple libraries:
+```
+python3 pd_cap_check.py project library extras/shared-abstractions
 ```
 
 ## Output

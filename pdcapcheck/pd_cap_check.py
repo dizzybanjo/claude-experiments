@@ -3,7 +3,7 @@
 pd_cap_check.py — Pure Data abstraction capitalisation checker
 
 Usage:
-    python pd_cap_check.py <project_folder> <library_folder>
+    python pd_cap_check.py <project_folder> <library_folder> [<library_folder2> ...]
 """
 
 import os
@@ -20,15 +20,16 @@ def find_pd_files(folder):
     return sorted(matches)
 
 
-def build_library_index(library_folder):
+def build_library_index(library_folders):
     """
     Return a dict mapping lowercase-name -> true-case-name
-    for every .pd file found in library_folder.
+    for every .pd file found across all library_folders.
     """
     index = {}
-    for path in find_pd_files(library_folder):
-        name = os.path.splitext(os.path.basename(path))[0]
-        index[name.lower()] = name
+    for folder in library_folders:
+        for path in find_pd_files(folder):
+            name = os.path.splitext(os.path.basename(path))[0]
+            index[name.lower()] = name
     return index
 
 
@@ -80,14 +81,16 @@ def check_project(project_folder, library_index):
     return failures, passes
 
 
-def print_report(failures, passes, project_folder, library_folder):
+def print_report(failures, passes, project_folder, library_folders):
     total = len(failures) + len(passes)
 
     print("=" * 60)
     print("PURE DATA ABSTRACTION CAPITALISATION REPORT")
     print("=" * 60)
     print(f"  Project folder : {project_folder}")
-    print(f"  Library folder : {library_folder}")
+    for i, folder in enumerate(library_folders):
+        label = "Library folder" if i == 0 else "              "
+        print(f"  {label} : {folder}")
     print(f"  Abstractions checked : {total}")
     print()
 
@@ -129,24 +132,28 @@ def print_report(failures, passes, project_folder, library_folder):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python pd_cap_check.py <project_folder> <library_folder>")
+    if len(sys.argv) < 3:
+        print("Usage: python pd_cap_check.py <project_folder> <library_folder> [<library_folder2> ...]")
         sys.exit(1)
 
     project_folder = sys.argv[1]
-    library_folder = sys.argv[2]
+    library_folders = sys.argv[2:]
 
-    for folder, label in [(project_folder, "project"), (library_folder, "library")]:
+    if not os.path.isdir(project_folder):
+        print(f"Error: project folder not found: {project_folder}")
+        sys.exit(1)
+
+    for folder in library_folders:
         if not os.path.isdir(folder):
-            print(f"Error: {label} folder not found: {folder}")
+            print(f"Error: library folder not found: {folder}")
             sys.exit(1)
 
-    library_index = build_library_index(library_folder)
+    library_index = build_library_index(library_folders)
     if not library_index:
-        print(f"Warning: no .pd files found in library folder: {library_folder}")
+        print("Warning: no .pd files found in any library folder")
 
     failures, passes = check_project(project_folder, library_index)
-    print_report(failures, passes, project_folder, library_folder)
+    print_report(failures, passes, project_folder, library_folders)
 
     # Exit with non-zero code if there are failures (useful for CI)
     sys.exit(1 if failures else 0)
