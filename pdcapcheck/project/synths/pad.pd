@@ -1,0 +1,6 @@
+#N canvas 0 0 450 300 10;
+#X obj 10 10 Oscbank;
+#X obj 10 50 lowPassFilter;
+#X obj 10 90 dac~;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;

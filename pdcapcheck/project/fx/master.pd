@@ -1,0 +1,9 @@
+#N canvas 0 0 450 300 10;
+#X obj 10 10 inlet~;
+#X obj 10 50 lowpassfilter;
+#X obj 10 90 reverbUnit;
+#X obj 10 130 Reverbunit;
+#X obj 10 170 outlet~;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;
+#X connect 2 0 4 0;
