@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Length Indexer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+      gap: 32px;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #fff;
+    }
+
+    #drop-zone {
+      width: 100%;
+      max-width: 560px;
+      height: 220px;
+      border: 2px dashed #333;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      background: #161616;
+    }
+
+    #drop-zone.drag-over {
+      border-color: #4f8ef7;
+      background: #131b2e;
+    }
+
+    #drop-zone.has-folder {
+      border-color: #2a7a4b;
+      background: #0e1f16;
+    }
+
+    .drop-icon {
+      font-size: 2.5rem;
+      line-height: 1;
+    }
+
+    .drop-label {
+      font-size: 0.95rem;
+      color: #888;
+    }
+
+    .drop-label strong {
+      color: #ccc;
+    }
+
+    #folder-name {
+      font-size: 0.85rem;
+      color: #4ade80;
+      font-weight: 500;
+      display: none;
+    }
+
+    #browse-btn {
+      background: none;
+      border: 1px solid #333;
+      color: #888;
+      font-size: 0.8rem;
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    #browse-btn:hover {
+      border-color: #555;
+      color: #ccc;
+    }
+
+    #results {
+      width: 100%;
+      max-width: 560px;
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .results-title {
+      font-size: 0.85rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .results-count {
+      font-size: 0.85rem;
+      color: #555;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th {
+      text-align: left;
+      color: #555;
+      font-weight: 500;
+      padding: 6px 10px;
+      border-bottom: 1px solid #222;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #1a1a1a;
+      color: #bbb;
+    }
+
+    td.filename { color: #ddd; font-family: "SF Mono", "Fira Code", monospace; }
+    td.duration { color: #888; text-align: right; }
+    td.id { color: #444; text-align: right; width: 40px; }
+
+    tr.error td { color: #f87171; }
+
+    #generate-btn {
+      width: 100%;
+      max-width: 560px;
+      padding: 12px;
+      background: #1a3a5c;
+      border: 1px solid #1d4d7a;
+      color: #7eb8f7;
+      font-size: 0.95rem;
+      font-weight: 500;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      display: none;
+    }
+
+    #generate-btn:hover:not(:disabled) {
+      background: #1e4570;
+      border-color: #2563a8;
+    }
+
+    #generate-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    #status {
+      font-size: 0.85rem;
+      color: #555;
+      text-align: center;
+      min-height: 1.2em;
+    }
+
+    #status.success { color: #4ade80; }
+    #status.error   { color: #f87171; }
+
+    .progress-bar-wrap {
+      width: 100%;
+      max-width: 560px;
+      height: 3px;
+      background: #1a1a1a;
+      border-radius: 2px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: #4f8ef7;
+      width: 0%;
+      transition: width 0.1s;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Audio Length Indexer</h1>
+
+  <div id="drop-zone">
+    <div class="drop-icon">🎵</div>
+    <div class="drop-label"><strong>Drop a folder</strong> of audio files here</div>
+    <div id="folder-name"></div>
+    <button id="browse-btn">or browse...</button>
+  <input type="file" id="folder-input" webkitdirectory accept="" style="display:none">
+  </div>
+
+  <div class="progress-bar-wrap" id="progress-wrap">
+    <div class="progress-bar" id="progress-bar"></div>
+  </div>
+
+  <div id="results">
+    <div class="results-header">
+      <span class="results-title">Files found</span>
+      <span class="results-count" id="results-count"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px">#</th>
+          <th>Filename</th>
+          <th style="text-align:right">Duration (ms)</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+
+  <button id="generate-btn">Write audio_lengths.txt</button>
+  <div id="status"></div>
+
+<script>
+  const SUPPORTED_EXTS = new Set(['.wav', '.aif', '.aiff', '.flac', '.ogg', '.mp3']);
+
+  let dirHandle = null;
+  let fileEntries = []; // [{id, name, ms}] or [{name, error}]
+
+  const dropZone     = document.getElementById('drop-zone');
+  const folderName   = document.getElementById('folder-name');
+  const browseBtn    = document.getElementById('browse-btn');
+  const resultsDiv   = document.getElementById('results');
+  const resultsCount = document.getElementById('results-count');
+  const resultsBody  = document.getElementById('results-body');
+  const generateBtn  = document.getElementById('generate-btn');
+  const statusEl     = document.getElementById('status');
+  const progressWrap = document.getElementById('progress-wrap');
+  const progressBar  = document.getElementById('progress-bar');
+
+  // ── Drag & drop ──────────────────────────────────────────────────────────────
+
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+  });
+
+  dropZone.addEventListener('drop', async e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+
+    const items = [...e.dataTransfer.items];
+    const dirItem = items.find(i => i.kind === 'file');
+    if (!dirItem) return setStatus('No folder detected in drop.', 'error');
+
+    try {
+      const handle = await dirItem.getAsFileSystemHandle();
+      if (handle.kind !== 'directory') return setStatus('Please drop a folder, not a file.', 'error');
+      await loadDirectory(handle);
+    } catch (err) {
+      // Fallback: try webkitGetAsEntry for read-only preview, then ask for save location
+      const entry = dirItem.webkitGetAsEntry?.();
+      if (entry?.isDirectory) {
+        await loadDirectoryViaEntry(entry);
+      } else {
+        setStatus('Could not access folder: ' + err.message, 'error');
+      }
+    }
+  });
+
+  // ── Browse button ─────────────────────────────────────────────────────────────
+
+  const folderInput = document.getElementById('folder-input');
+
+  browseBtn.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (window.showDirectoryPicker) {
+      try {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        await loadDirectory(handle);
+      } catch (err) {
+        if (err.name !== 'AbortError') setStatus('Could not open folder: ' + err.message, 'error');
+      }
+    } else {
+      folderInput.click();
+    }
+  });
+
+  folderInput.addEventListener('change', async () => {
+    const files = [...folderInput.files];
+    if (!files.length) return;
+    dirHandle = null;
+    const folderPath = files[0].webkitRelativePath.split('/')[0];
+    setFolderLabel(folderPath);
+    await scanAndProcess(async function* () {
+      for (const file of files) {
+        yield { name: file.name, getFile: () => Promise.resolve(file) };
+      }
+    });
+    folderInput.value = '';
+  });
+
+  // ── Load directory via FileSystemDirectoryHandle (read+write) ─────────────────
+
+  async function loadDirectory(handle) {
+    dirHandle = handle;
+    setFolderLabel(handle.name);
+    await scanAndProcess(async function* () {
+      for await (const [name, fh] of handle.entries()) {
+        if (fh.kind === 'file') yield { name, getFile: () => fh.getFile() };
+      }
+    });
+  }
+
+  // ── Fallback: webkitEntry (read-only; save via showSaveFilePicker) ─────────────
+
+  async function loadDirectoryViaEntry(entry) {
+    dirHandle = null; // no write handle; will use showSaveFilePicker
+    setFolderLabel(entry.name + ' (read-only mode)');
+    await scanAndProcess(async function* () {
+      const reader = entry.createReader();
+      const allEntries = await readAllEntries(reader);
+      for (const fe of allEntries) {
+        if (fe.isFile) {
+          yield {
+            name: fe.name,
+            getFile: () => new Promise((res, rej) => fe.file(res, rej))
+          };
+        }
+      }
+    });
+  }
+
+  function readAllEntries(reader) {
+    return new Promise((resolve, reject) => {
+      const all = [];
+      function read() {
+        reader.readEntries(batch => {
+          if (batch.length === 0) return resolve(all);
+          all.push(...batch);
+          read();
+        }, reject);
+      }
+      read();
+    });
+  }
+
+  // ── Core: scan files, decode audio, show results ───────────────────────────────
+
+  async function scanAndProcess(iterFactory) {
+    setStatus('Scanning folder…');
+    resultsDiv.style.display = 'none';
+    generateBtn.style.display = 'none';
+    resultsBody.innerHTML = '';
+    fileEntries = [];
+
+    // Collect audio files
+    const audioFiles = [];
+    for await (const item of iterFactory()) {
+      const ext = extOf(item.name);
+      if (SUPPORTED_EXTS.has(ext)) audioFiles.push(item);
+    }
+
+    audioFiles.sort((a, b) => a.name.localeCompare(b.name));
+
+    if (audioFiles.length === 0) {
+      setStatus('No audio files found (.wav .aif .aiff .flac .ogg .mp3).', 'error');
+      return;
+    }
+
+    setStatus(`Processing ${audioFiles.length} file${audioFiles.length > 1 ? 's' : ''}…`);
+    progressWrap.style.display = 'block';
+    progressBar.style.width = '0%';
+
+    const ctx = new AudioContext();
+    let id = 1;
+
+    for (let i = 0; i < audioFiles.length; i++) {
+      const item = audioFiles[i];
+      progressBar.style.width = ((i / audioFiles.length) * 100) + '%';
+
+      const row = resultsBody.insertRow();
+      try {
+        const file = await item.getFile();
+        const buf  = await file.arrayBuffer();
+        const decoded = await ctx.decodeAudioData(buf);
+        const ms = Math.round(decoded.duration * 1000 * 1000) / 1000;
+
+        fileEntries.push({ id, name: item.name, ms });
+        row.insertCell().className = 'id';        row.cells[0].textContent = id;
+        row.insertCell().className = 'filename';  row.cells[1].textContent = item.name;
+        row.insertCell().className = 'duration';  row.cells[2].textContent = ms.toFixed(3);
+        id++;
+      } catch (err) {
+        fileEntries.push({ name: item.name, error: err.message });
+        row.className = 'error';
+        row.insertCell().className = 'id';        row.cells[0].textContent = '–';
+        row.insertCell().className = 'filename';  row.cells[1].textContent = item.name;
+        row.insertCell().className = 'duration';  row.cells[2].textContent = 'error';
+      }
+    }
+
+    await ctx.close();
+    progressBar.style.width = '100%';
+    setTimeout(() => { progressWrap.style.display = 'none'; }, 400);
+
+    const good = fileEntries.filter(e => !e.error).length;
+    const bad  = fileEntries.filter(e =>  e.error).length;
+    resultsCount.textContent = `${good} ok${bad ? `, ${bad} error${bad > 1 ? 's' : ''}` : ''}`;
+    resultsDiv.style.display = 'flex';
+    generateBtn.style.display = 'block';
+    setStatus('');
+  }
+
+  // ── Write audio_lengths.txt ───────────────────────────────────────────────────
+
+  generateBtn.addEventListener('click', async () => {
+    const lines = fileEntries
+      .filter(e => !e.error)
+      .map(e => `${e.id} ${e.name} ${e.ms.toFixed(3)};`)
+      .join('\n') + '\n';
+
+    if (dirHandle) {
+      // Write directly into the folder
+      try {
+        // Request write permission if needed
+        const perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+        if (perm !== 'granted') return setStatus('Write permission denied.', 'error');
+
+        const fh = await dirHandle.getFileHandle('audio_lengths.txt', { create: true });
+        const writable = await fh.createWritable();
+        await writable.write(lines);
+        await writable.close();
+        setStatus(`Saved audio_lengths.txt in "${dirHandle.name}"`, 'success');
+      } catch (err) {
+        setStatus('Write failed: ' + err.message, 'error');
+      }
+    } else {
+      // No directory handle — trigger a download
+      const blob = new Blob([lines], { type: 'text/plain' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'audio_lengths.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus('Downloaded audio_lengths.txt — move it into your audio folder.', 'success');
+    }
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  function extOf(name) {
+    const i = name.lastIndexOf('.');
+    return i >= 0 ? name.slice(i).toLowerCase() : '';
+  }
+
+  function setFolderLabel(name) {
+    folderName.textContent = name;
+    folderName.style.display = 'block';
+    dropZone.classList.add('has-folder');
+    dropZone.querySelector('.drop-label').innerHTML = '<strong>Drop a new folder</strong> to replace';
+  }
+
+  function setStatus(msg, type = '') {
+    statusEl.textContent = msg;
+    statusEl.className = type;
+  }
+</script>
+</body>
+</html>
