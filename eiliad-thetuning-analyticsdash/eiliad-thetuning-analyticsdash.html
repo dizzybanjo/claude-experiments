@@ -410,6 +410,35 @@
       </div>
     </div>
 
+    <!-- Streaks -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Streaks</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>App Streak — Current</h3>
+          <p class="sub">Consecutive days with any event, up to each user's last recorded date</p>
+          <div class="chart-wrap"><canvas id="chart-streak-app-cur"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>App Streak — Longest Ever</h3>
+          <p class="sub">All-time best run of consecutive days with any event</p>
+          <div class="chart-wrap"><canvas id="chart-streak-app-best"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Activity Streak — Current</h3>
+          <p class="sub">Consecutive days with a completed breathing, meditation or nature session</p>
+          <div class="chart-wrap"><canvas id="chart-streak-act-cur"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Activity Streak — Longest Ever</h3>
+          <p class="sub">All-time best run of consecutive days with a completed activity</p>
+          <div class="chart-wrap"><canvas id="chart-streak-act-best"></canvas></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </main>
 
@@ -642,6 +671,8 @@ function applyFilters() {
   renderActivityOverTime();
   renderDaysActive();
   renderResonanceOverTime();
+  // streaks
+  renderStreaks();
 }
 
 // ---- stats ----
@@ -954,6 +985,69 @@ function renderResonanceOverTime() {
     });
     renderLineChart('chart-res-time', labels, data, PALETTE[5], 'Avg resonance');
   }
+}
+
+// ---- streaks ----
+function calcStreaksForEvents(events) {
+  // Build set of active dates per user from the given events
+  const userDates = {};
+  events.forEach(r => {
+    const user = r[cols.user], dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    if (!userDates[user]) userDates[user] = new Set();
+    userDates[user].add(dt.toISOString().slice(0, 10));
+  });
+
+  const results = {};
+  Object.entries(userDates).forEach(([user, set]) => {
+    const dates = [...set].sort();
+    // longest streak
+    let longest = 1, run = 1;
+    for (let i = 1; i < dates.length; i++) {
+      const gap = (new Date(dates[i]) - new Date(dates[i - 1])) / 86400000;
+      run = gap === 1 ? run + 1 : 1;
+      if (run > longest) longest = run;
+    }
+    // current streak (consecutive days ending on last date)
+    let current = 1;
+    for (let i = dates.length - 1; i > 0; i--) {
+      const gap = (new Date(dates[i]) - new Date(dates[i - 1])) / 86400000;
+      if (gap === 1) current++; else break;
+    }
+    results[user] = { current, longest };
+  });
+  return results;
+}
+
+function renderStreaks() {
+  // Streak 1: any event
+  const appStreaks = calcStreaksForEvents(filteredData);
+
+  // Streak 2: completed activities only (finished breathing/meditation/nature)
+  const completedActivities = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task') &&
+    ACTIVITIES.some(a => (r[cols.entity] || '').toLowerCase().includes(a)) &&
+    isEndAction(r[cols.action] || '')
+  );
+  const actStreaks = calcStreaksForEvents(completedActivities);
+
+  function streakChart(streaks, key, canvasId) {
+    const sorted = Object.entries(streaks)
+      .map(([user, s]) => ({ user, val: s[key] }))
+      .filter(x => x.val > 0)
+      .sort((a, b) => b.val - a.val);
+    renderBarChart(canvasId,
+      sorted.map(x => x.user),
+      sorted.map(x => x.val),
+      sorted.map((_, i) => PALETTE[i % PALETTE.length]),
+      'Days'
+    );
+  }
+
+  streakChart(appStreaks, 'current', 'chart-streak-app-cur');
+  streakChart(appStreaks, 'longest', 'chart-streak-app-best');
+  streakChart(actStreaks, 'current', 'chart-streak-act-cur');
+  streakChart(actStreaks, 'longest', 'chart-streak-act-best');
 }
 
 // ---- chart helper ----
