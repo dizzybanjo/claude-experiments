@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EILIAD — The Tuning Analytics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #222535;
+      --border: #2e3248;
+      --accent: #6c63ff;
+      --accent2: #a78bfa;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #f87171;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+
+    header .pill {
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 48px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: var(--surface);
+      margin-bottom: 28px;
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: #1e1a3a; }
+    .upload-zone svg { color: var(--muted); margin-bottom: 12px; }
+    .upload-zone p { color: var(--muted); margin-top: 8px; font-size: 13px; }
+    .upload-zone strong { color: var(--text); }
+    #file-input { display: none; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+    .field-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .field-group select, .field-group input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 7px;
+      font-size: 13px;
+      outline: none;
+      appearance: none;
+    }
+    .field-group select:focus, .field-group input:focus {
+      border-color: var(--accent);
+    }
+
+    /* Filters bar */
+    .filters-bar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 28px;
+      display: none;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .filters-bar.visible { display: flex; }
+    .filters-bar .field-group { min-width: 160px; flex: 1; }
+    .filters-bar .field-group label { font-size: 11px; }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+      display: none;
+    }
+    .stats-row.visible { display: grid; }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .stat-card .label { color: var(--muted); font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+    .stat-card .value { font-size: 26px; font-weight: 700; letter-spacing: -1px; }
+
+    /* Charts grid */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+      gap: 20px;
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+    }
+    .chart-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .chart-card .sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+    .chart-wrap { position: relative; height: 280px; }
+
+    /* Empty state */
+    .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 40px 0; }
+
+    /* Charts wrapper + sections */
+    .charts-wrapper { display: none; }
+    .charts-wrapper.visible { display: block; }
+    .charts-section { margin-bottom: 32px; }
+    .section-header {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .section-header .section-title { font-size: 15px; font-weight: 600; }
+    .section-header .section-tags { color: var(--muted); font-size: 12px; }
+
+    /* File badge */
+    .file-badge {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .file-badge.visible { display: flex; }
+    .file-badge .name { font-weight: 500; }
+    .file-badge .rows { color: var(--muted); }
+    .file-badge .reset { margin-left: auto; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; }
+    .file-badge .reset:hover { color: var(--rose); }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6c63ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+    <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+  </svg>
+  <h1>EILIAD — The Tuning Analytics Dashboard</h1>
+  <span class="pill">Beta</span>
+</header>
+
+<main>
+  <!-- Upload zone -->
+  <div class="upload-zone" id="upload-zone">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <strong>Drop your CSV file here</strong>
+    <p>or click to browse &mdash; data never leaves your browser</p>
+    <input type="file" id="file-input" accept=".csv">
+  </div>
+
+  <!-- File badge (shown after upload) -->
+  <div class="file-badge" id="file-badge">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <span class="name" id="badge-name"></span>
+    <span class="rows" id="badge-rows"></span>
+    <span class="reset" id="reset-btn" title="Remove file">&times;</span>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters-bar" id="filters-bar">
+    <div class="field-group">
+      <label>From date</label>
+      <input type="date" id="filter-from">
+    </div>
+    <div class="field-group">
+      <label>To date</label>
+      <input type="date" id="filter-to">
+    </div>
+    <div class="field-group">
+      <label>User</label>
+      <select id="filter-user">
+        <option value="">All users</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label>Event type</label>
+      <select id="filter-type">
+        <option value="">All types</option>
+      </select>
+    </div>
+    <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
+      <label>Exclude users registered between</label>
+    </div>
+    <div class="field-group">
+      <label>From</label>
+      <input type="date" id="filter-excl-from">
+    </div>
+    <div class="field-group">
+      <label>To</label>
+      <input type="date" id="filter-excl-to">
+    </div>
+    <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
+    <button class="btn btn-ghost" id="filter-reset-btn">Reset</button>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="stats-row" id="stats-row">
+<div class="stat-card"><div class="label">Unique users</div><div class="value" id="stat-users">—</div></div>
+    <div class="stat-card"><div class="label">Avg resonance ↑</div><div class="value" id="stat-resonance">—</div></div>
+    <div class="stat-card"><div class="label">Date range</div><div class="value" style="font-size:15px;letter-spacing:-0.3px" id="stat-range">—</div></div>
+  </div>
+
+  <!-- Charts wrapper -->
+  <div class="charts-wrapper" id="charts-wrapper">
+
+    <!-- Chapters -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Chapters</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Chapter Completions</h3>
+          <p class="sub">Distinct users who visited each chapter</p>
+          <div class="chart-wrap"><canvas id="chart-chapters"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Chapter Reach Rate</h3>
+          <p class="sub">% of all users who reached each chapter</p>
+          <div class="chart-wrap"><canvas id="chart-reach"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Drop-off Point</h3>
+          <p class="sub">Last chapter reached per user — where users stop progressing</p>
+          <div class="chart-wrap"><canvas id="chart-dropoff"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Chapter Re-entry Rate</h3>
+          <p class="sub">% of visitors who returned to each chapter more than once</p>
+          <div class="chart-wrap"><canvas id="chart-reentry"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Resonance by Chapter</h3>
+          <p class="sub">Average resonance level recorded during each chapter</p>
+          <div class="chart-wrap"><canvas id="chart-chap-resonance"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activities -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Activities</span>
+        <span class="section-tags">breathing · meditation · nature</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Volume</h3>
+          <p class="sub">Sessions started per activity type</p>
+          <div class="chart-wrap"><canvas id="chart-act-volume"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Avg Resonance Increase</h3>
+          <p class="sub">Mean resonance gain (start → end) per activity</p>
+          <div class="chart-wrap"><canvas id="chart-act-resonance"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Completion Rate</h3>
+          <p class="sub">% of started sessions that reached a finished event</p>
+          <div class="chart-wrap"><canvas id="chart-completion"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Average Session Duration</h3>
+          <p class="sub">Mean time from start to finish per activity (minutes)</p>
+          <div class="chart-wrap"><canvas id="chart-duration"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Extras -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Extras</span>
+        <span class="section-tags">rain · stargazing</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Volume</h3>
+          <p class="sub">Sessions started per extra type</p>
+          <div class="chart-wrap"><canvas id="chart-ext-volume"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Avg Resonance Increase</h3>
+          <p class="sub">Mean resonance gain (start → end) per extra</p>
+          <div class="chart-wrap"><canvas id="chart-ext-resonance"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Engagement -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Engagement</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Activity Over Time</h3>
+          <p class="sub">Task sessions started per week</p>
+          <div class="chart-wrap"><canvas id="chart-over-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Days Active</h3>
+          <p class="sub">Number of distinct active days per user</p>
+          <div class="chart-wrap"><canvas id="chart-days-active"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resonance Trends -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Resonance Trends</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Resonance Over Time</h3>
+          <p class="sub">Select a user to see their resonance journey; all users shows daily average</p>
+          <div class="chart-wrap"><canvas id="chart-res-time"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+// ---- state ----
+let rawData = [];
+let filteredData = [];
+let charts = {};
+
+const cols = {
+  user:      'User ID',
+  datetime:  'Event Date/Time',
+  type:      'Event Category',
+  entity:    'Entity ID',
+  action:    'Event Action',
+  resonance: 'Resonance',
+};
+
+// ---- colour palette ----
+const PALETTE = ['#6c63ff','#34d399','#fbbf24','#f87171','#60a5fa','#a78bfa','#fb923c','#4ade80'];
+
+const ACTIVITIES     = ['breathing', 'meditation', 'nature'];
+const EXTRAS         = ['rain', 'stargazing'];
+const START_KEYWORDS = ['start', 'begin', 'open', 'launch'];
+const END_KEYWORDS   = ['end', 'complete', 'finish', 'close', 'stop', 'done'];
+
+function isStartAction(val) {
+  const v = (val || '').toLowerCase();
+  return START_KEYWORDS.some(k => v.includes(k));
+}
+function isEndAction(val) {
+  const v = (val || '').toLowerCase();
+  return END_KEYWORDS.some(k => v.includes(k));
+}
+
+// Pair start→end events per user+entity and return { entityName -> [delta, ...] }
+function buildDeltaMap(events) {
+  const sessions = {};
+  events.forEach(r => {
+    const entity = (cols.entity && r[cols.entity]) || '';
+    const key    = `${r[cols.user]}||${entity}`;
+    if (!sessions[key]) sessions[key] = { entity, starts: [], ends: [] };
+    const dt  = parseDate(r[cols.datetime]);
+    const res = parseFloat(r[cols.resonance]);
+    if (!dt || isNaN(res)) return;
+    const action = r[cols.action] || '';
+    if (isStartAction(action))   sessions[key].starts.push({ dt, res });
+    else if (isEndAction(action)) sessions[key].ends.push({ dt, res });
+  });
+
+  const deltaMap = {};
+  Object.values(sessions).forEach(({ entity, starts, ends }) => {
+    if (!entity) return;
+    starts.sort((a, b) => a.dt - b.dt);
+    ends.sort((a, b) => a.dt - b.dt);
+    const usedEnds = new Set();
+    starts.forEach(start => {
+      const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
+      if (match) {
+        usedEnds.add(match);
+        if (!deltaMap[entity]) deltaMap[entity] = [];
+        deltaMap[entity].push(match.res - start.res);
+      }
+    });
+  });
+
+  return deltaMap;
+}
+
+// ---- upload zone ----
+const uploadZone = document.getElementById('upload-zone');
+const fileInput  = document.getElementById('file-input');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', () => fileInput.files[0] && handleFile(fileInput.files[0]));
+
+document.getElementById('reset-btn').addEventListener('click', resetAll);
+
+function handleFile(file) {
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete(results) {
+      if (!results.data.length) { alert('CSV appears to be empty.'); return; }
+      rawData = results.data;
+      showBadge(file.name, rawData.length);
+      setupFilters();
+      applyFilters();
+      document.getElementById('filters-bar').classList.add('visible');
+      document.getElementById('stats-row').classList.add('visible');
+      document.getElementById('charts-wrapper').classList.add('visible');
+    },
+    error(err) { alert('Parse error: ' + err.message); }
+  });
+}
+
+function showBadge(name, rows) {
+  document.getElementById('badge-name').textContent = name;
+  document.getElementById('badge-rows').textContent = `${rows.toLocaleString()} rows`;
+  document.getElementById('file-badge').classList.add('visible');
+  uploadZone.style.display = 'none';
+}
+
+function resetAll() {
+  rawData = []; filteredData = [];
+  fileInput.value = '';
+  uploadZone.style.display = '';
+  document.getElementById('file-badge').classList.remove('visible');
+  document.getElementById('filters-bar').classList.remove('visible');
+  document.getElementById('stats-row').classList.remove('visible');
+  document.getElementById('charts-wrapper').classList.remove('visible');
+  Object.values(charts).forEach(c => c && c.destroy());
+  charts = {};
+}
+
+// ---- user dropdown ----
+function getExcludedUsers() {
+  const exclFrom = document.getElementById('filter-excl-from').value;
+  const exclTo   = document.getElementById('filter-excl-to').value;
+  if (!exclFrom && !exclTo) return new Set();
+  const excluded = new Set();
+  rawData.forEach(r => {
+    const reg = parseDate(r['User Registration Date']);
+    if (!reg) return;
+    const afterFrom = !exclFrom || reg >= new Date(exclFrom);
+    const beforeTo  = !exclTo   || reg <= new Date(exclTo + 'T23:59:59');
+    if (afterFrom && beforeTo) excluded.add(r[cols.user]);
+  });
+  return excluded;
+}
+
+function updateUserDropdown(excludedUsers) {
+  const sel = document.getElementById('filter-user');
+  const prev = sel.value;
+  const userMap = {};
+  rawData.forEach(r => {
+    const u = r[cols.user];
+    if (u && !userMap[u] && !excludedUsers.has(u))
+      userMap[u] = r['User Registration Date'] || '';
+  });
+  sel.innerHTML = '<option value="">All users</option>';
+  Object.keys(userMap).sort((a, b) => new Date(userMap[b]) - new Date(userMap[a])).forEach(u => {
+    const o = document.createElement('option');
+    o.value = u;
+    o.textContent = u + (userMap[u] ? ' — joined ' + userMap[u].slice(0, 10) : '');
+    sel.appendChild(o);
+  });
+  sel.value = excludedUsers.has(prev) ? '' : prev;
+}
+
+// ---- filters ----
+function setupFilters() {
+  updateUserDropdown(new Set());
+
+  // populate type filter
+  const types = [...new Set(rawData.map(r => r[cols.type]).filter(Boolean))].sort();
+  const sel = document.getElementById('filter-type');
+  sel.innerHTML = '<option value="">All types</option>';
+  types.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+  // set date bounds
+  if (cols.datetime) {
+    const dates = rawData.map(r => parseDate(r[cols.datetime])).filter(Boolean).sort((a,b) => a-b);
+    if (dates.length) {
+      document.getElementById('filter-from').value = fmtDateInput(dates[0]);
+      document.getElementById('filter-to').value   = fmtDateInput(dates[dates.length-1]);
+    }
+  }
+}
+
+document.getElementById('filter-apply-btn').addEventListener('click', applyFilters);
+document.getElementById('filter-reset-btn').addEventListener('click', () => {
+  document.getElementById('filter-from').value      = '';
+  document.getElementById('filter-to').value        = '';
+  document.getElementById('filter-user').value      = '';
+  document.getElementById('filter-type').value      = '';
+  document.getElementById('filter-excl-from').value = '';
+  document.getElementById('filter-excl-to').value   = '';
+  applyFilters();
+});
+
+function applyFilters() {
+  const excludedUsers = getExcludedUsers();
+  updateUserDropdown(excludedUsers);
+
+  const from  = document.getElementById('filter-from').value;
+  const to    = document.getElementById('filter-to').value;
+  const userQ = document.getElementById('filter-user').value;
+  const typeQ = document.getElementById('filter-type').value;
+
+  filteredData = rawData.filter(row => {
+    if (excludedUsers.has(row[cols.user])) return false;
+    if (userQ && row[cols.user] !== userQ) return false;
+    if (typeQ && (row[cols.type] || '') !== typeQ) return false;
+    if ((from || to) && cols.datetime) {
+      const d = parseDate(row[cols.datetime]);
+      if (from && d && d < new Date(from)) return false;
+      if (to   && d && d > new Date(to + 'T23:59:59')) return false;
+    }
+    return true;
+  });
+
+  renderStats();
+  // chapters
+  renderChapters();
+  renderChapterReachRate();
+  renderDropOff();
+  renderReEntry();
+  renderResonanceByChapter();
+  // activities
+  renderGroupCharts(ACTIVITIES, 'chart-act-volume', 'chart-act-resonance',
+    [PALETTE[0], PALETTE[1], PALETTE[2]]);
+  renderCompletionRate();
+  renderAvgDuration();
+  // extras
+  renderGroupCharts(EXTRAS, 'chart-ext-volume', 'chart-ext-resonance',
+    [PALETTE[4], PALETTE[5]]);
+  // engagement
+  renderActivityOverTime();
+  renderDaysActive();
+  renderResonanceOverTime();
+}
+
+// ---- stats ----
+function renderStats() {
+const users = new Set(filteredData.map(r => r[cols.user]).filter(Boolean));
+  document.getElementById('stat-users').textContent = users.size.toLocaleString();
+
+  if (cols.resonance) {
+    const vals = filteredData.map(r => parseFloat(r[cols.resonance])).filter(v => !isNaN(v));
+    const avg = vals.length ? (vals.reduce((a,b) => a+b, 0) / vals.length) : null;
+    document.getElementById('stat-resonance').textContent = avg != null ? avg.toFixed(2) : '—';
+  }
+
+  if (cols.datetime && filteredData.length) {
+    const dates = filteredData.map(r => parseDate(r[cols.datetime])).filter(Boolean).sort((a,b) => a-b);
+    if (dates.length) {
+      const fmt = d => d.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'2-digit'});
+      document.getElementById('stat-range').textContent =
+        dates[0].toDateString() === dates[dates.length-1].toDateString()
+          ? fmt(dates[0])
+          : `${fmt(dates[0])} – ${fmt(dates[dates.length-1])}`;
+    }
+  }
+}
+
+// ---- chart: chapters ----
+function renderChapters() {
+  // Filter to chapter events
+  const chapterEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('chapter')
+  );
+
+  // Group by Entity ID (the chapter identifier); fall back to type value
+  const byChapter = {};
+  chapterEvents.forEach(r => {
+    const chapter = (cols.entity && r[cols.entity]) || r[cols.type] || 'Unknown';
+    if (!byChapter[chapter]) byChapter[chapter] = new Set();
+    byChapter[chapter].add(r[cols.user]);
+  });
+
+  const labels = Object.keys(byChapter).sort(naturalSort);
+  const data   = labels.map(l => byChapter[l].size);
+
+  renderBarChart('chart-chapters', labels, data,
+    labels.map((_, i) => PALETTE[i % PALETTE.length]),
+    'Unique users'
+  );
+}
+
+// ---- chart group: volume + resonance delta for a named entity set ----
+function renderGroupCharts(entityNames, volumeChartId, resonanceChartId, palette) {
+  const taskEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task')
+  );
+
+  // Filter to entities belonging to this group
+  const groupEvents = taskEvents.filter(r => {
+    const entity = (r[cols.entity] || '').toLowerCase();
+    return entityNames.some(n => entity.includes(n.toLowerCase()));
+  });
+
+  // Volume: count start events (fall back to all events if no start/end distinction found)
+  const startEvents = groupEvents.filter(r => isStartAction(r[cols.action] || ''));
+  const volumeSrc   = startEvents.length > 0 ? startEvents : groupEvents;
+
+  const volCounts = {};
+  entityNames.forEach(n => { volCounts[n] = 0; }); // seed so all labels always appear
+  volumeSrc.forEach(r => {
+    const entity  = (r[cols.entity] || '').toLowerCase();
+    const matched = entityNames.find(n => entity.includes(n.toLowerCase()));
+    if (matched) volCounts[matched]++;
+  });
+
+  renderBarChart(volumeChartId,
+    entityNames,
+    entityNames.map(n => volCounts[n]),
+    palette, 'Sessions'
+  );
+
+  // Resonance delta: pair start→end and average the deltas
+  if (!cols.resonance || !cols.action) {
+    destroyChart(resonanceChartId);
+    return;
+  }
+
+  const deltaMap = buildDeltaMap(groupEvents);
+
+  const resLabels = entityNames.filter(n => {
+    const key = Object.keys(deltaMap).find(k => k.toLowerCase().includes(n.toLowerCase()));
+    return key && deltaMap[key].length > 0;
+  });
+  const resData = resLabels.map(n => {
+    const key = Object.keys(deltaMap).find(k => k.toLowerCase().includes(n.toLowerCase()));
+    const arr = deltaMap[key];
+    return +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(3);
+  });
+
+  renderBarChart(resonanceChartId, resLabels, resData, palette, 'Avg Δ resonance');
+}
+
+// ---- chapter metrics ----
+function renderChapterReachRate() {
+  const totalUsers = new Set(filteredData.map(r => r[cols.user]).filter(Boolean)).size;
+  if (!totalUsers) { destroyChart('chart-reach'); return; }
+  const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
+  const byChapter = {};
+  chEvts.forEach(r => {
+    const ch = r[cols.entity] || 'Unknown';
+    if (!byChapter[ch]) byChapter[ch] = new Set();
+    byChapter[ch].add(r[cols.user]);
+  });
+  const labels = Object.keys(byChapter).sort(naturalSort);
+  const data   = labels.map(l => +((byChapter[l].size / totalUsers) * 100).toFixed(1));
+  renderBarChart('chart-reach', labels, data, labels.map((_,i) => PALETTE[i % PALETTE.length]), '% of users');
+}
+
+function renderDropOff() {
+  const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
+  const lastChapter = {};
+  chEvts.forEach(r => {
+    const user = r[cols.user], ch = r[cols.entity] || 'Unknown';
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    if (!lastChapter[user] || dt > lastChapter[user].dt) lastChapter[user] = { ch, dt };
+  });
+  const counts = {};
+  Object.values(lastChapter).forEach(({ ch }) => { counts[ch] = (counts[ch] || 0) + 1; });
+  const labels = Object.keys(counts).sort(naturalSort);
+  renderBarChart('chart-dropoff', labels, labels.map(l => counts[l]),
+    labels.map((_,i) => PALETTE[i % PALETTE.length]), 'Users');
+}
+
+function renderReEntry() {
+  const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
+  const byChapter = {};
+  chEvts.forEach(r => {
+    const ch = r[cols.entity] || 'Unknown', user = r[cols.user];
+    if (!byChapter[ch]) byChapter[ch] = {};
+    byChapter[ch][user] = (byChapter[ch][user] || 0) + 1;
+  });
+  const labels = Object.keys(byChapter).sort(naturalSort);
+  const data = labels.map(ch => {
+    const users = byChapter[ch];
+    const total    = Object.keys(users).length;
+    const returned = Object.values(users).filter(c => c > 1).length;
+    return total ? +((returned / total) * 100).toFixed(1) : 0;
+  });
+  renderBarChart('chart-reentry', labels, data, labels.map((_,i) => PALETTE[i % PALETTE.length]), '% re-entered');
+}
+
+function renderResonanceByChapter() {
+  const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
+  const byChapter = {};
+  chEvts.forEach(r => {
+    const ch = r[cols.entity] || 'Unknown';
+    const res = parseFloat(r[cols.resonance]);
+    if (isNaN(res)) return;
+    if (!byChapter[ch]) byChapter[ch] = [];
+    byChapter[ch].push(res);
+  });
+  const labels = Object.keys(byChapter).sort(naturalSort);
+  const data   = labels.map(ch => {
+    const arr = byChapter[ch];
+    return +(arr.reduce((a,b) => a+b, 0) / arr.length).toFixed(1);
+  });
+  renderBarChart('chart-chap-resonance', labels, data,
+    labels.map((_,i) => PALETTE[i % PALETTE.length]), 'Avg resonance');
+}
+
+// ---- activity metrics ----
+function renderCompletionRate() {
+  const taskEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('task'));
+  const counts = {};
+  ACTIVITIES.forEach(a => { counts[a] = { started: 0, finished: 0 }; });
+  taskEvts.forEach(r => {
+    const entity  = (r[cols.entity]||'').toLowerCase();
+    const matched = ACTIVITIES.find(a => entity.includes(a));
+    if (!matched) return;
+    const action = r[cols.action] || '';
+    if (isStartAction(action))    counts[matched].started++;
+    else if (isEndAction(action)) counts[matched].finished++;
+  });
+  const data = ACTIVITIES.map(a => counts[a].started
+    ? +((counts[a].finished / counts[a].started) * 100).toFixed(1) : 0);
+  renderBarChart('chart-completion', ACTIVITIES, data,
+    [PALETTE[0], PALETTE[1], PALETTE[2]], '% completed');
+}
+
+function buildDurationMap(events) {
+  const sessions = {};
+  events.forEach(r => {
+    const entity = r[cols.entity] || '';
+    const key = `${r[cols.user]}||${entity}`;
+    if (!sessions[key]) sessions[key] = { entity, starts: [], ends: [] };
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    const action = r[cols.action] || '';
+    if (isStartAction(action))    sessions[key].starts.push({ dt });
+    else if (isEndAction(action)) sessions[key].ends.push({ dt });
+  });
+  const dMap = {};
+  Object.values(sessions).forEach(({ entity, starts, ends }) => {
+    if (!entity) return;
+    starts.sort((a,b) => a.dt - b.dt);
+    ends.sort((a,b) => a.dt - b.dt);
+    const usedEnds = new Set();
+    starts.forEach(start => {
+      const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
+      if (match) {
+        usedEnds.add(match);
+        if (!dMap[entity]) dMap[entity] = [];
+        dMap[entity].push((match.dt - start.dt) / 60000);
+      }
+    });
+  });
+  return dMap;
+}
+
+function renderAvgDuration() {
+  const taskEvts = filteredData.filter(r =>
+    (r[cols.type]||'').toLowerCase().includes('task') &&
+    ACTIVITIES.some(a => (r[cols.entity]||'').toLowerCase().includes(a))
+  );
+  const dMap   = buildDurationMap(taskEvts);
+  const labels = ACTIVITIES.filter(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    return key && dMap[key].length > 0;
+  });
+  const data = labels.map(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    const arr = dMap[key];
+    return +(arr.reduce((x,y) => x+y, 0) / arr.length).toFixed(2);
+  });
+  renderBarChart('chart-duration', labels, data, [PALETTE[0], PALETTE[1], PALETTE[2]], 'Avg mins');
+}
+
+// ---- engagement metrics ----
+function renderActivityOverTime() {
+  const taskEvts = filteredData.filter(r =>
+    (r[cols.type]||'').toLowerCase().includes('task') && isStartAction(r[cols.action]||'')
+  );
+  if (!taskEvts.length) { destroyChart('chart-over-time'); return; }
+
+  const dates = taskEvts.map(r => parseDate(r[cols.datetime])).filter(Boolean);
+  const minD = new Date(Math.min(...dates)), maxD = new Date(Math.max(...dates));
+  const useWeeks = (maxD - minD) / 86400000 <= 90;
+
+  const buckets = {};
+  taskEvts.forEach(r => {
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    let key;
+    if (useWeeks) {
+      const ws = new Date(dt);
+      ws.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); // Monday
+      key = ws.toISOString().slice(0,10);
+    } else {
+      key = dt.toISOString().slice(0,7);
+    }
+    buckets[key] = (buckets[key] || 0) + 1;
+  });
+
+  const labels = Object.keys(buckets).sort();
+  renderLineChart('chart-over-time', labels, labels.map(l => buckets[l]), PALETTE[0], 'Sessions');
+}
+
+function renderDaysActive() {
+  const userDays = {};
+  filteredData.forEach(r => {
+    const user = r[cols.user], dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    if (!userDays[user]) userDays[user] = new Set();
+    userDays[user].add(dt.toISOString().slice(0,10));
+  });
+  const sorted = Object.entries(userDays)
+    .map(([u, days]) => ({ user: u, days: days.size }))
+    .sort((a,b) => b.days - a.days);
+  renderBarChart('chart-days-active',
+    sorted.map(x => x.user), sorted.map(x => x.days),
+    sorted.map((_,i) => PALETTE[i % PALETTE.length]), 'Days');
+}
+
+function renderResonanceOverTime() {
+  const userQ  = document.getElementById('filter-user').value;
+  const events = filteredData.filter(r => {
+    const res = parseFloat(r[cols.resonance]);
+    return !isNaN(res) && parseDate(r[cols.datetime]);
+  });
+
+  if (userQ) {
+    const sorted = events
+      .filter(r => r[cols.user] === userQ)
+      .sort((a,b) => parseDate(a[cols.datetime]) - parseDate(b[cols.datetime]));
+    const labels = sorted.map(r =>
+      parseDate(r[cols.datetime]).toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'2-digit'})
+    );
+    renderLineChart('chart-res-time', labels, sorted.map(r => parseFloat(r[cols.resonance])),
+      PALETTE[5], 'Resonance');
+  } else {
+    const byDay = {};
+    events.forEach(r => {
+      const key = parseDate(r[cols.datetime]).toISOString().slice(0,10);
+      if (!byDay[key]) byDay[key] = [];
+      byDay[key].push(parseFloat(r[cols.resonance]));
+    });
+    const labels = Object.keys(byDay).sort();
+    const data   = labels.map(k => {
+      const arr = byDay[k];
+      return +(arr.reduce((a,b) => a+b, 0) / arr.length).toFixed(2);
+    });
+    renderLineChart('chart-res-time', labels, data, PALETTE[5], 'Avg resonance');
+  }
+}
+
+// ---- chart helper ----
+function renderLineChart(canvasId, labels, data, color, yLabel) {
+  destroyChart(canvasId);
+  if (!labels.length) {
+    const ctx = document.getElementById(canvasId);
+    if (ctx) { ctx.parentElement.dataset.chartId = canvasId;
+      ctx.parentElement.innerHTML = `<p class="empty">No data for this view.</p>`; }
+    return;
+  }
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2,
+        pointRadius: data.length > 60 ? 0 : 3,
+        pointHoverRadius: 5,
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: { label: c => ` ${c.parsed.y} ${yLabel}` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12 }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
+          title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function renderBarChart(canvasId, labels, data, colors, yLabel) {
+  destroyChart(canvasId);
+
+  if (!labels.length) {
+    const ctx = document.getElementById(canvasId);
+    if (ctx) {
+      ctx.parentElement.dataset.chartId = canvasId;
+      ctx.parentElement.innerHTML = `<p class="empty">No data for this view.</p>`;
+    }
+    return;
+  }
+
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  const bgColors = labels.map((_, i) => colors[i % colors.length]);
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: bgColors.map(c => c + 'cc'),
+        borderColor: bgColors,
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            label: ctx => ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' }
+        },
+        y: {
+          beginAtZero: yLabel !== 'Avg Δ resonance',
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); charts[id] = null; }
+  // restore canvas if it was replaced with an empty state message
+  const wrap = document.querySelector(`.chart-wrap:has(#${id}), .chart-wrap:has(.empty)`);
+  const allWraps = document.querySelectorAll('.chart-wrap');
+  allWraps.forEach(w => {
+    const empty = w.querySelector('p.empty');
+    // only restore if this wrap was for this chart id (canvas gone, empty present)
+    if (empty && !w.querySelector('canvas')) {
+      // find by data attribute we set when replacing
+      if (w.dataset.chartId === id) {
+        w.innerHTML = `<canvas id="${id}"></canvas>`;
+        delete w.dataset.chartId;
+      }
+    }
+  });
+}
+
+// ---- utils ----
+function parseDate(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function fmtDateInput(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function naturalSort(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+</script>
+</body>
+</html>
