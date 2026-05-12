@@ -796,7 +796,7 @@ function renderDropOff() {
     const user = r[cols.user], ch = r[cols.entity] || 'Unknown';
     const dt = parseDate(r[cols.datetime]);
     if (!dt) return;
-    if (!lastChapter[user] || dt > lastChapter[user].dt) lastChapter[user] = { ch, dt };
+    if (!lastChapter[user] || dt >= lastChapter[user].dt) lastChapter[user] = { ch, dt };
   });
   const counts = {};
   Object.values(lastChapter).forEach(({ ch }) => { counts[ch] = (counts[ch] || 0) + 1; });

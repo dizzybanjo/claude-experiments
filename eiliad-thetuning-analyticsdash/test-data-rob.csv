@@ -1,0 +1,6 @@
+User ID,Event Date/Time,Event Category,Entity ID,Event Action,Resonance,User Registration Date
+rob,2025-03-01 09:00,chapter,chapter-1,started,50,2025-01-10
+rob,2025-03-02 09:00,chapter,chapter-2,started,62,2025-01-10
+rob,2025-03-03 09:00,chapter,chapter-1,started,65,2025-01-10
+rob,2025-03-04 09:00,chapter,chapter-3,started,70,2025-01-10
+rob,2025-03-04 09:00,chapter,chapter-4,started,100,2025-01-10
