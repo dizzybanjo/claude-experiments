@@ -1034,7 +1034,7 @@ function renderStreaks() {
   function streakChart(streaks, key, canvasId) {
     const sorted = Object.entries(streaks)
       .map(([user, s]) => ({ user, val: s[key] }))
-      .filter(x => x.val > 0)
+      .filter(x => x.val > 1)
       .sort((a, b) => b.val - a.val);
     renderBarChart(canvasId,
       sorted.map(x => x.user),
