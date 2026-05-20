@@ -354,6 +354,11 @@
           <p class="sub">Mean time from start to finish per activity (minutes)</p>
           <div class="chart-wrap"><canvas id="chart-duration"></canvas></div>
         </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Resonance Improvement Over Time</h3>
+          <p class="sub">Average resonance gain per session (start → end) per activity, grouped by week/month — shows whether people are improving at each practice</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-act-resonance-trend"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -664,6 +669,7 @@ function applyFilters() {
     [PALETTE[0], PALETTE[1], PALETTE[2]]);
   renderCompletionRate();
   renderAvgDuration();
+  renderActivityResonanceTrend();
   // extras
   renderGroupCharts(EXTRAS, 'chart-ext-volume', 'chart-ext-resonance',
     [PALETTE[4], PALETTE[5]]);
@@ -1048,6 +1054,117 @@ function renderStreaks() {
   streakChart(appStreaks, 'longest', 'chart-streak-app-best');
   streakChart(actStreaks, 'current', 'chart-streak-act-cur');
   streakChart(actStreaks, 'longest', 'chart-streak-act-best');
+}
+
+// ---- activity resonance trend over time ----
+function renderActivityResonanceTrend() {
+  const taskEvts = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task')
+  );
+
+  const activityData = {};
+  ACTIVITIES.forEach(a => { activityData[a] = {}; });
+
+  const sessions = {};
+  taskEvts.forEach(r => {
+    const entity = (r[cols.entity] || '').toLowerCase();
+    const matched = ACTIVITIES.find(a => entity.includes(a));
+    if (!matched) return;
+    const key = `${r[cols.user]}||${r[cols.entity]}`;
+    if (!sessions[key]) sessions[key] = { activity: matched, starts: [], ends: [] };
+    const dt = parseDate(r[cols.datetime]);
+    const res = parseFloat(r[cols.resonance]);
+    if (!dt || isNaN(res)) return;
+    const action = r[cols.action] || '';
+    if (isStartAction(action))    sessions[key].starts.push({ dt, res });
+    else if (isEndAction(action)) sessions[key].ends.push({ dt, res });
+  });
+
+  const allDates = taskEvts.map(r => parseDate(r[cols.datetime])).filter(Boolean);
+  const useWeeks = allDates.length > 0 &&
+    (Math.max(...allDates.map(d => d.getTime())) - Math.min(...allDates.map(d => d.getTime()))) / 86400000 <= 90;
+
+  function getBucket(dt) {
+    if (useWeeks) {
+      const ws = new Date(dt);
+      ws.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+      return ws.toISOString().slice(0, 10);
+    }
+    return dt.toISOString().slice(0, 7);
+  }
+
+  Object.values(sessions).forEach(({ activity, starts, ends }) => {
+    starts.sort((a, b) => a.dt - b.dt);
+    ends.sort((a, b) => a.dt - b.dt);
+    const usedEnds = new Set();
+    starts.forEach(start => {
+      const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
+      if (match) {
+        usedEnds.add(match);
+        const bucket = getBucket(start.dt);
+        if (!activityData[activity][bucket]) activityData[activity][bucket] = [];
+        activityData[activity][bucket].push(match.res - start.res);
+      }
+    });
+  });
+
+  const allBuckets = new Set();
+  ACTIVITIES.forEach(a => Object.keys(activityData[a]).forEach(k => allBuckets.add(k)));
+  const labels = [...allBuckets].sort();
+
+  if (!labels.length) { destroyChart('chart-act-resonance-trend'); return; }
+
+  const colors = [PALETTE[0], PALETTE[1], PALETTE[2]];
+  const datasets = ACTIVITIES.map((activity, i) => ({
+    label: activity.charAt(0).toUpperCase() + activity.slice(1),
+    data: labels.map(bucket => {
+      const arr = activityData[activity][bucket];
+      if (!arr || !arr.length) return null;
+      return +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(3);
+    }),
+    borderColor: colors[i],
+    backgroundColor: colors[i] + '22',
+    borderWidth: 2,
+    pointRadius: labels.length > 60 ? 0 : 4,
+    pointHoverRadius: 6,
+    fill: false,
+    tension: 0.3,
+    spanGaps: true,
+  }));
+
+  destroyChart('chart-act-resonance-trend');
+  const ctx = document.getElementById('chart-act-resonance-trend');
+  if (!ctx) return;
+
+  charts['chart-act-resonance-trend'] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#e2e8f0', font: { size: 12 }, boxWidth: 12, padding: 16 }
+        },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` ${c.dataset.label}: ${c.parsed.y != null ? c.parsed.y.toFixed(3) : 'n/a'} Δ resonance`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12 }, grid: { color: '#1e2235' } },
+        y: {
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: 'Avg Δ resonance', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
 }
 
 // ---- chart helper ----
