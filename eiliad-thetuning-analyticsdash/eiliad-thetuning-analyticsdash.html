@@ -166,10 +166,12 @@
       border-radius: var(--radius);
       padding: 22px 24px;
     }
+    .chart-card { position: relative; }
     .chart-card h3 {
       font-size: 14px;
       font-weight: 600;
       margin-bottom: 4px;
+      padding-right: 30px;
     }
     .chart-card .sub {
       font-size: 12px;
@@ -177,6 +179,25 @@
       margin-bottom: 18px;
     }
     .chart-wrap { position: relative; height: 280px; }
+
+    .chart-toggle {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 4px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      display: flex;
+      align-items: center;
+      line-height: 0;
+    }
+    .chart-toggle:hover { color: var(--text); background: var(--surface2); }
+    .chart-card.collapsed .sub,
+    .chart-card.collapsed .chart-wrap { display: none; }
 
     /* Empty state */
     .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 40px 0; }
@@ -553,6 +574,7 @@ function handleFile(file) {
       document.getElementById('filters-bar').classList.add('visible');
       document.getElementById('stats-row').classList.add('visible');
       document.getElementById('charts-wrapper').classList.add('visible');
+      initChartToggles();
     },
     error(err) { alert('Parse error: ' + err.message); }
   });
@@ -1424,6 +1446,60 @@ function fmtDateInput(d) {
 
 function naturalSort(a, b) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// ---- chart visibility toggles ----
+const SVG_EYE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const SVG_EYE_OFF = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+const VISIBILITY_KEY = 'eiliad_chart_visibility';
+
+function initChartToggles() {
+  document.querySelectorAll('.chart-card').forEach(card => {
+    const canvas = card.querySelector('canvas');
+    if (!canvas || !canvas.id) return;
+    card.dataset.chartId = canvas.id;
+
+    if (card.querySelector('.chart-toggle')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'chart-toggle';
+    btn.title = 'Show / hide this chart';
+    btn.innerHTML = SVG_EYE;
+    btn.addEventListener('click', () => {
+      const collapsed = card.classList.toggle('collapsed');
+      btn.innerHTML = collapsed ? SVG_EYE_OFF : SVG_EYE;
+      saveVisibilityState();
+    });
+    card.appendChild(btn);
+  });
+
+  restoreVisibilityState();
+}
+
+function saveVisibilityState() {
+  const state = {};
+  document.querySelectorAll('.chart-card[data-chart-id]').forEach(card => {
+    state[card.dataset.chartId] = !card.classList.contains('collapsed');
+  });
+  localStorage.setItem(VISIBILITY_KEY, JSON.stringify(state));
+}
+
+function restoreVisibilityState() {
+  let state;
+  try { state = JSON.parse(localStorage.getItem(VISIBILITY_KEY) || '{}'); }
+  catch(e) { state = {}; }
+
+  document.querySelectorAll('.chart-card[data-chart-id]').forEach(card => {
+    const btn = card.querySelector('.chart-toggle');
+    if (!btn) return;
+    if (state[card.dataset.chartId] === false) {
+      card.classList.add('collapsed');
+      btn.innerHTML = SVG_EYE_OFF;
+    } else {
+      card.classList.remove('collapsed');
+      btn.innerHTML = SVG_EYE;
+    }
+  });
 }
 </script>
 </body>
