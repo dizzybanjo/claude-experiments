@@ -324,6 +324,11 @@
           <p class="sub">Average resonance level recorded during each chapter</p>
           <div class="chart-wrap"><canvas id="chart-chap-resonance"></canvas></div>
         </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time of Day — Chapters</h3>
+          <p class="sub">Events per hour of day for each chapter</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-chap-time-of-day"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -358,6 +363,11 @@
           <h3>Resonance Improvement Over Time</h3>
           <p class="sub">Average resonance gain per session (start → end) per activity, grouped by week/month — shows whether people are improving at each practice</p>
           <div class="chart-wrap" style="height:320px;"><canvas id="chart-act-resonance-trend"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time of Day — Activities</h3>
+          <p class="sub">Sessions started per hour of day for each activity type</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-act-time-of-day"></canvas></div>
         </div>
       </div>
     </div>
@@ -664,12 +674,14 @@ function applyFilters() {
   renderDropOff();
   renderReEntry();
   renderResonanceByChapter();
+  renderChapterTimeOfDay();
   // activities
   renderGroupCharts(ACTIVITIES, 'chart-act-volume', 'chart-act-resonance',
     [PALETTE[0], PALETTE[1], PALETTE[2]]);
   renderCompletionRate();
   renderAvgDuration();
   renderActivityResonanceTrend();
+  renderActivityTimeOfDay();
   // extras
   renderGroupCharts(EXTRAS, 'chart-ext-volume', 'chart-ext-resonance',
     [PALETTE[4], PALETTE[5]]);
@@ -1165,6 +1177,113 @@ function renderActivityResonanceTrend() {
       }
     }
   });
+}
+
+// ---- time of day helpers ----
+function hourLabels() {
+  return Array.from({ length: 24 }, (_, h) => {
+    if (h === 0) return '12am';
+    if (h < 12) return `${h}am`;
+    if (h === 12) return '12pm';
+    return `${h - 12}pm`;
+  });
+}
+
+function renderMultiLineTimeChart(canvasId, datasets, yLabel) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: hourLabels(), datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, labels: { color: '#e2e8f0', font: { size: 12 }, boxWidth: 12, padding: 16 } },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y} ${yLabel}` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { color: '#1e2235' } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+function renderActivityTimeOfDay() {
+  const taskEvts = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task') &&
+    isStartAction(r[cols.action] || '')
+  );
+
+  const hourData = {};
+  ACTIVITIES.forEach(a => { hourData[a] = new Array(24).fill(0); });
+
+  taskEvts.forEach(r => {
+    const entity = (r[cols.entity] || '').toLowerCase();
+    const matched = ACTIVITIES.find(a => entity.includes(a));
+    if (!matched) return;
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    hourData[matched][dt.getHours()]++;
+  });
+
+  const hasData = ACTIVITIES.some(a => hourData[a].some(v => v > 0));
+  if (!hasData) { destroyChart('chart-act-time-of-day'); return; }
+
+  const datasets = ACTIVITIES.map((activity, i) => ({
+    label: activity.charAt(0).toUpperCase() + activity.slice(1),
+    data: hourData[activity],
+    borderColor: PALETTE[i],
+    backgroundColor: PALETTE[i] + '22',
+    borderWidth: 2,
+    pointRadius: 3,
+    pointHoverRadius: 6,
+    fill: false,
+    tension: 0.3,
+  }));
+
+  renderMultiLineTimeChart('chart-act-time-of-day', datasets, 'sessions');
+}
+
+function renderChapterTimeOfDay() {
+  const chEvts = filteredData.filter(r => (r[cols.type] || '').toLowerCase().includes('chapter'));
+  const chapters = [...new Set(chEvts.map(r => r[cols.entity] || 'Unknown'))].sort(naturalSort);
+  if (!chapters.length) { destroyChart('chart-chap-time-of-day'); return; }
+
+  const hourData = {};
+  chapters.forEach(ch => { hourData[ch] = new Array(24).fill(0); });
+
+  chEvts.forEach(r => {
+    const ch = r[cols.entity] || 'Unknown';
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    hourData[ch][dt.getHours()]++;
+  });
+
+  const datasets = chapters.map((ch, i) => ({
+    label: ch,
+    data: hourData[ch],
+    borderColor: PALETTE[i % PALETTE.length],
+    backgroundColor: PALETTE[i % PALETTE.length] + '22',
+    borderWidth: 2,
+    pointRadius: 3,
+    pointHoverRadius: 6,
+    fill: false,
+    tension: 0.3,
+  }));
+
+  renderMultiLineTimeChart('chart-chap-time-of-day', datasets, 'events');
 }
 
 // ---- chart helper ----
