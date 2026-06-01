@@ -232,6 +232,22 @@
     .file-badge .rows { color: var(--muted); }
     .file-badge .reset { margin-left: auto; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; }
     .file-badge .reset:hover { color: var(--rose); }
+
+    /* Churn table */
+    .churn-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .churn-table th, .churn-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .churn-table th {
+      color: var(--muted); font-size: 11px; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.4px;
+      position: sticky; top: 0; background: var(--surface);
+    }
+    .churn-table tr:last-child td { border-bottom: none; }
+    .churn-table tr:hover td { background: var(--surface2); }
+    .churn-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .churn-active  { background: #34d39922; color: #34d399; }
+    .churn-at-risk { background: #fbbf2422; color: #fbbf24; }
+    .churn-churned { background: #f8717122; color: #f87171; }
+    .churn-table-wrap { max-height: 320px; overflow-y: auto; margin-top: 8px; border-radius: 8px; border: 1px solid var(--border); }
   </style>
 </head>
 <body>
@@ -309,6 +325,8 @@
 <div class="stat-card"><div class="label">Unique users</div><div class="value" id="stat-users">—</div></div>
     <div class="stat-card"><div class="label">Avg resonance ↑</div><div class="value" id="stat-resonance">—</div></div>
     <div class="stat-card"><div class="label">Date range</div><div class="value" style="font-size:15px;letter-spacing:-0.3px" id="stat-range">—</div></div>
+    <div class="stat-card"><div class="label">DAU / MAU</div><div class="value" id="stat-dau-mau">—</div></div>
+    <div class="stat-card"><div class="label">Avg session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-len">—</div></div>
   </div>
 
   <!-- Charts wrapper -->
@@ -429,6 +447,11 @@
           <p class="sub">Number of distinct active days per user</p>
           <div class="chart-wrap"><canvas id="chart-days-active"></canvas></div>
         </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time of Day — All Sessions</h3>
+          <p class="sub">App opens per hour of day (from app opened events)</p>
+          <div class="chart-wrap" style="height:280px;"><canvas id="chart-overall-tod"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -475,6 +498,65 @@
       </div>
     </div>
 
+    <!-- Sessions -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Sessions</span>
+        <span class="section-tags">derived from app opened / last seen events</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Avg Session Length per User</h3>
+          <p class="sub">Mean session duration per user (minutes)</p>
+          <div class="chart-wrap"><canvas id="chart-session-length-user"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Session Length Over Time</h3>
+          <p class="sub">Average session duration per week or month</p>
+          <div class="chart-wrap"><canvas id="chart-session-length-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Session Frequency per User</h3>
+          <p class="sub">Total sessions per user over the selected period</p>
+          <div class="chart-wrap"><canvas id="chart-session-freq"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Sessions per Week</h3>
+          <p class="sub">Total sessions across all users per week</p>
+          <div class="chart-wrap"><canvas id="chart-sessions-per-week"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Retention -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Retention</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>DAU / MAU</h3>
+          <p class="sub">Daily active users vs 30-day rolling monthly active users (by app opens)</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-dau-mau"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Stickiness (DAU/MAU %)</h3>
+          <p class="sub">% of monthly active users who opened the app on each day</p>
+          <div class="chart-wrap"><canvas id="chart-stickiness"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Churn Risk</h3>
+          <p class="sub">Users by days since last seen (relative to latest date in dataset)</p>
+          <div class="chart-wrap"><canvas id="chart-churn-risk"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>User Last Seen</h3>
+          <p class="sub">Each user's last activity and churn risk status</p>
+          <div class="churn-table-wrap" id="churn-table-container"></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </main>
 
@@ -483,6 +565,7 @@
 let rawData = [];
 let filteredData = [];
 let charts = {};
+let sessionData = [];
 
 const cols = {
   user:      'User ID',
@@ -588,7 +671,7 @@ function showBadge(name, rows) {
 }
 
 function resetAll() {
-  rawData = []; filteredData = [];
+  rawData = []; filteredData = []; sessionData = [];
   fileInput.value = '';
   uploadZone.style.display = '';
   document.getElementById('file-badge').classList.remove('visible');
@@ -689,6 +772,8 @@ function applyFilters() {
     return true;
   });
 
+  sessionData = buildAppSessions(filteredData);
+
   renderStats();
   // chapters
   renderChapters();
@@ -710,9 +795,15 @@ function applyFilters() {
   // engagement
   renderActivityOverTime();
   renderDaysActive();
+  renderOverallTimeOfDay();
   renderResonanceOverTime();
   // streaks
   renderStreaks();
+  // sessions
+  renderSessionCharts();
+  // retention
+  renderDAUMAU();
+  renderChurnCharts();
 }
 
 // ---- stats ----
@@ -734,6 +825,49 @@ const users = new Set(filteredData.map(r => r[cols.user]).filter(Boolean));
         dates[0].toDateString() === dates[dates.length-1].toDateString()
           ? fmt(dates[0])
           : `${fmt(dates[0])} – ${fmt(dates[dates.length-1])}`;
+    }
+  }
+
+  // DAU/MAU stat — ratio on most recent day in dataset
+  const dauEl = document.getElementById('stat-dau-mau');
+  if (dauEl) {
+    const openedEvents = filteredData.filter(r =>
+      (r[cols.type] || '').toLowerCase() === 'app' &&
+      (r[cols.action] || '').toLowerCase().startsWith('opened')
+    );
+    const dayUsers = {};
+    openedEvents.forEach(r => {
+      const user = r[cols.user], dt = parseDate(r[cols.datetime]);
+      if (!user || !dt) return;
+      const day = dt.toISOString().slice(0, 10);
+      if (!dayUsers[day]) dayUsers[day] = new Set();
+      dayUsers[day].add(user);
+    });
+    const days = Object.keys(dayUsers).sort();
+    if (days.length) {
+      const lastDay = days[days.length - 1];
+      const dau = dayUsers[lastDay].size;
+      const lastDate = new Date(lastDay + 'T00:00:00Z');
+      const thirtyBack = new Date(lastDate.getTime() - 29 * 86400000);
+      const mauSet = new Set();
+      days.forEach(d => {
+        const dd = new Date(d + 'T00:00:00Z');
+        if (dd >= thirtyBack && dd <= lastDate) dayUsers[d].forEach(u => mauSet.add(u));
+      });
+      dauEl.textContent = mauSet.size > 0 ? `${(dau / mauSet.size * 100).toFixed(0)}%` : '—';
+    } else {
+      dauEl.textContent = '—';
+    }
+  }
+
+  // Avg session length stat
+  const sessionLenEl = document.getElementById('stat-session-len');
+  if (sessionLenEl) {
+    if (sessionData.length) {
+      const avg = sessionData.reduce((a, s) => a + s.length, 0) / sessionData.length;
+      sessionLenEl.textContent = avg >= 60 ? `${(avg / 60).toFixed(1)}h` : `${avg.toFixed(1)}m`;
+    } else {
+      sessionLenEl.textContent = '—';
     }
   }
 }
@@ -1446,6 +1580,302 @@ function fmtDateInput(d) {
 
 function naturalSort(a, b) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// ---- app session helpers ----
+
+// Parse "HH:MM DD/MM/YYYY" out of action strings like "opened 17:18 01/06/2026"
+function parseActionTimestamp(action) {
+  const m = (action || '').match(/(\d{1,2}):(\d{2})\s+(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  const [, hh, mm, dd, mo, yyyy] = m;
+  return new Date(`${yyyy}-${mo}-${dd}T${hh.padStart(2,'0')}:${mm}:00`);
+}
+
+// Build sessions from app "opened" / "last seen" event pairs, matched by Entity ID (session UUID)
+function buildAppSessions(data) {
+  const bySession = {};
+  data.forEach(r => {
+    if ((r[cols.type] || '').toLowerCase() !== 'app') return;
+    const action = (r[cols.action] || '').toLowerCase();
+    const sessionId = r[cols.entity];
+    const user = r[cols.user];
+    if (!sessionId || !user) return;
+    if (!bySession[sessionId]) bySession[sessionId] = { user, opened: null, lastSeen: null };
+    if (action.startsWith('opened')) {
+      const ts = parseActionTimestamp(r[cols.action]) || parseDate(r[cols.datetime]);
+      if (ts && (!bySession[sessionId].opened || ts < bySession[sessionId].opened))
+        bySession[sessionId].opened = ts;
+    } else if (action.startsWith('last seen')) {
+      const ts = parseActionTimestamp(r[cols.action]) || parseDate(r[cols.datetime]);
+      if (ts && (!bySession[sessionId].lastSeen || ts > bySession[sessionId].lastSeen))
+        bySession[sessionId].lastSeen = ts;
+    }
+  });
+
+  const sessions = [];
+  Object.values(bySession).forEach(s => {
+    if (!s.opened || !s.user) return;
+    const end = s.lastSeen && s.lastSeen >= s.opened ? s.lastSeen : s.opened;
+    sessions.push({ user: s.user, start: s.opened, end, length: (end - s.opened) / 60000 });
+  });
+  return sessions;
+}
+
+// ---- session charts ----
+function renderSessionCharts() {
+  const SESSION_CHART_IDS = ['chart-session-length-user','chart-session-length-time','chart-session-freq','chart-sessions-per-week'];
+  if (!sessionData.length) { SESSION_CHART_IDS.forEach(id => destroyChart(id)); return; }
+
+  // Avg session length per user
+  const userLengths = {};
+  sessionData.forEach(s => {
+    if (!userLengths[s.user]) userLengths[s.user] = [];
+    userLengths[s.user].push(s.length);
+  });
+  const ulSorted = Object.entries(userLengths)
+    .map(([u, arr]) => ({ user: u, avg: +(arr.reduce((a,b) => a+b, 0) / arr.length).toFixed(1) }))
+    .sort((a, b) => b.avg - a.avg);
+  renderBarChart('chart-session-length-user',
+    ulSorted.map(x => x.user), ulSorted.map(x => x.avg),
+    ulSorted.map((_, i) => PALETTE[i % PALETTE.length]), 'mins');
+
+  // Session length over time
+  const allStarts = sessionData.map(s => s.start);
+  const minD = new Date(Math.min(...allStarts)), maxD = new Date(Math.max(...allStarts));
+  const useWeeks = (maxD - minD) / 86400000 <= 90;
+  const timeBuckets = {};
+  sessionData.forEach(s => {
+    let key;
+    if (useWeeks) {
+      const ws = new Date(s.start);
+      ws.setDate(s.start.getDate() - ((s.start.getDay() + 6) % 7));
+      key = ws.toISOString().slice(0, 10);
+    } else {
+      key = s.start.toISOString().slice(0, 7);
+    }
+    if (!timeBuckets[key]) timeBuckets[key] = [];
+    timeBuckets[key].push(s.length);
+  });
+  const tbLabels = Object.keys(timeBuckets).sort();
+  renderLineChart('chart-session-length-time', tbLabels,
+    tbLabels.map(k => +(timeBuckets[k].reduce((a,b) => a+b, 0) / timeBuckets[k].length).toFixed(1)),
+    PALETTE[3], 'avg mins');
+
+  // Session frequency per user
+  const userCount = {};
+  sessionData.forEach(s => { userCount[s.user] = (userCount[s.user] || 0) + 1; });
+  const ucSorted = Object.entries(userCount)
+    .map(([u, c]) => ({ user: u, count: c }))
+    .sort((a, b) => b.count - a.count);
+  renderBarChart('chart-session-freq',
+    ucSorted.map(x => x.user), ucSorted.map(x => x.count),
+    ucSorted.map((_, i) => PALETTE[i % PALETTE.length]), 'sessions');
+
+  // Sessions per week
+  const weekBuckets = {};
+  sessionData.forEach(s => {
+    const ws = new Date(s.start);
+    ws.setDate(s.start.getDate() - ((s.start.getDay() + 6) % 7));
+    const key = ws.toISOString().slice(0, 10);
+    weekBuckets[key] = (weekBuckets[key] || 0) + 1;
+  });
+  const wLabels = Object.keys(weekBuckets).sort();
+  renderBarChart('chart-sessions-per-week', wLabels, wLabels.map(k => weekBuckets[k]),
+    wLabels.map((_, i) => PALETTE[i % PALETTE.length]), 'sessions');
+}
+
+// ---- DAU / MAU ----
+function renderDAUMAU() {
+  const openedEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase() === 'app' &&
+    (r[cols.action] || '').toLowerCase().startsWith('opened')
+  );
+  if (!openedEvents.length) { destroyChart('chart-dau-mau'); destroyChart('chart-stickiness'); return; }
+
+  const dayUsers = {};
+  openedEvents.forEach(r => {
+    const user = r[cols.user], dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    const day = dt.toISOString().slice(0, 10);
+    if (!dayUsers[day]) dayUsers[day] = new Set();
+    dayUsers[day].add(user);
+  });
+  const days = Object.keys(dayUsers).sort();
+
+  const metrics = days.map(day => {
+    const dau = dayUsers[day].size;
+    const dayDate = new Date(day + 'T00:00:00Z');
+    const thirtyBack = new Date(dayDate.getTime() - 29 * 86400000);
+    const mauSet = new Set();
+    days.forEach(d => {
+      const dd = new Date(d + 'T00:00:00Z');
+      if (dd >= thirtyBack && dd <= dayDate) dayUsers[d].forEach(u => mauSet.add(u));
+    });
+    const mau = mauSet.size;
+    return { day, dau, mau, ratio: mau ? +(dau / mau * 100).toFixed(1) : 0 };
+  });
+
+  destroyChart('chart-dau-mau');
+  const ctx1 = document.getElementById('chart-dau-mau');
+  if (ctx1) {
+    charts['chart-dau-mau'] = new Chart(ctx1, {
+      type: 'line',
+      data: {
+        labels: metrics.map(m => m.day),
+        datasets: [
+          {
+            label: 'DAU',
+            data: metrics.map(m => m.dau),
+            borderColor: PALETTE[0], backgroundColor: PALETTE[0] + '22',
+            borderWidth: 2, pointRadius: metrics.length > 60 ? 0 : 3,
+            pointHoverRadius: 5, fill: false, tension: 0.3,
+          },
+          {
+            label: 'MAU (30-day rolling)',
+            data: metrics.map(m => m.mau),
+            borderColor: PALETTE[1], backgroundColor: PALETTE[1] + '22',
+            borderWidth: 2, pointRadius: metrics.length > 60 ? 0 : 3,
+            pointHoverRadius: 5, fill: false, tension: 0.3,
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, labels: { color: '#e2e8f0', font: { size: 12 }, boxWidth: 12, padding: 16 } },
+          tooltip: {
+            backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+            callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y} users` }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12 }, grid: { color: '#1e2235' } },
+          y: { beginAtZero: true, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
+            title: { display: true, text: 'Users', color: '#475569', font: { size: 11 } } }
+        }
+      }
+    });
+  }
+
+  renderLineChart('chart-stickiness', metrics.map(m => m.day), metrics.map(m => m.ratio), PALETTE[2], '% stickiness');
+}
+
+// ---- churn detection ----
+function renderChurnCharts() {
+  // Use "last seen" app events; extract actual timestamp from action string
+  const lastSeenEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase() === 'app' &&
+    (r[cols.action] || '').toLowerCase().startsWith('last seen')
+  );
+
+  const lastSeen = {};
+  lastSeenEvents.forEach(r => {
+    const user = r[cols.user];
+    const ts = parseActionTimestamp(r[cols.action]) || parseDate(r[cols.datetime]);
+    if (!user || !ts) return;
+    if (!lastSeen[user] || ts > lastSeen[user]) lastSeen[user] = ts;
+  });
+
+  const users = Object.keys(lastSeen);
+  if (!users.length) {
+    destroyChart('chart-churn-risk');
+    const c = document.getElementById('churn-table-container');
+    if (c) c.innerHTML = '';
+    return;
+  }
+
+  const today = new Date(Math.max(...Object.values(lastSeen)));
+  const active = [], atRisk = [], churned = [];
+  users.forEach(user => {
+    const daysSince = (today - lastSeen[user]) / 86400000;
+    const entry = { user, daysSince: +daysSince.toFixed(1), last: lastSeen[user] };
+    if (daysSince < 7)       active.push(entry);
+    else if (daysSince < 30) atRisk.push(entry);
+    else                     churned.push(entry);
+  });
+
+  renderBarChart('chart-churn-risk',
+    ['Active (<7d)', 'At Risk (7–30d)', 'Churned (>30d)'],
+    [active.length, atRisk.length, churned.length],
+    [PALETTE[1], PALETTE[2], PALETTE[3]], 'users');
+
+  const container = document.getElementById('churn-table-container');
+  if (!container) return;
+
+  const allUsers = [
+    ...active.map(u => ({ ...u, status: 'active',  label: 'Active' })),
+    ...atRisk.map(u => ({ ...u, status: 'at-risk', label: 'At Risk' })),
+    ...churned.map(u => ({ ...u, status: 'churned', label: 'Churned' })),
+  ].sort((a, b) => a.daysSince - b.daysSince);
+
+  const fmtDate = d => d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  container.innerHTML = `
+    <table class="churn-table">
+      <thead><tr>
+        <th>User</th><th>Last Seen</th><th>Days Ago</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        ${allUsers.map(u => `
+          <tr>
+            <td>${u.user}</td>
+            <td>${fmtDate(u.last)}</td>
+            <td>${u.daysSince}</td>
+            <td><span class="churn-badge churn-${u.status}">${u.label}</span></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ---- overall time of day ----
+function renderOverallTimeOfDay() {
+  const openedEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase() === 'app' &&
+    (r[cols.action] || '').toLowerCase().startsWith('opened')
+  );
+  const hourCounts = new Array(24).fill(0);
+  openedEvents.forEach(r => {
+    const ts = parseActionTimestamp(r[cols.action]) || parseDate(r[cols.datetime]);
+    if (!ts) return;
+    hourCounts[ts.getHours()]++;
+  });
+  if (!hourCounts.some(v => v > 0)) { destroyChart('chart-overall-tod'); return; }
+
+  destroyChart('chart-overall-tod');
+  const ctx = document.getElementById('chart-overall-tod');
+  if (!ctx) return;
+  charts['chart-overall-tod'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: hourLabels(),
+      datasets: [{
+        data: hourCounts,
+        backgroundColor: PALETTE[0] + 'cc',
+        borderColor: PALETTE[0],
+        borderWidth: 1.5,
+        borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: { label: c => ` ${c.parsed.y} opens` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { color: '#1e2235' } },
+        y: { beginAtZero: true, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
+          title: { display: true, text: 'App opens', color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
 }
 
 // ---- chart visibility toggles ----
