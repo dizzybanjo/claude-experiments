@@ -248,6 +248,32 @@
     .churn-at-risk { background: #fbbf2422; color: #fbbf24; }
     .churn-churned { background: #f8717122; color: #f87171; }
     .churn-table-wrap { max-height: 320px; overflow-y: auto; margin-top: 8px; border-radius: 8px; border: 1px solid var(--border); }
+
+    .user-input-wrap {
+      display: flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      overflow: hidden;
+    }
+    .user-input-wrap:focus-within { border-color: var(--accent); }
+    .user-prefix {
+      padding: 8px 3px 8px 10px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      user-select: none;
+      line-height: 1;
+    }
+    .user-input-wrap input {
+      border: none !important;
+      background: transparent !important;
+      flex: 1;
+      padding: 8px 10px 8px 2px;
+      min-width: 0;
+      width: auto;
+    }
   </style>
 </head>
 <body>
@@ -295,9 +321,11 @@
     </div>
     <div class="field-group">
       <label>User</label>
-      <select id="filter-user">
-        <option value="">All users</option>
-      </select>
+      <div class="user-input-wrap">
+        <span class="user-prefix">USER-</span>
+        <input type="text" id="filter-user" placeholder="type ID…" list="user-datalist">
+      </div>
+      <datalist id="user-datalist"></datalist>
     </div>
     <div class="field-group">
       <label>Event type</label>
@@ -699,22 +727,23 @@ function getExcludedUsers() {
 }
 
 function updateUserDropdown(excludedUsers) {
-  const sel = document.getElementById('filter-user');
-  const prev = sel.value;
+  const input = document.getElementById('filter-user');
+  const datalist = document.getElementById('user-datalist');
+  const prev = input.value;
   const userMap = {};
   rawData.forEach(r => {
     const u = r[cols.user];
     if (u && !userMap[u] && !excludedUsers.has(u))
       userMap[u] = r['User Registration Date'] || '';
   });
-  sel.innerHTML = '<option value="">All users</option>';
+  datalist.innerHTML = '';
   Object.keys(userMap).sort((a, b) => new Date(userMap[b]) - new Date(userMap[a])).forEach(u => {
+    const suffix = u.startsWith('USER-') ? u.slice(5) : u;
     const o = document.createElement('option');
-    o.value = u;
-    o.textContent = u + (userMap[u] ? ' — joined ' + userMap[u].slice(0, 10) : '');
-    sel.appendChild(o);
+    o.value = suffix;
+    datalist.appendChild(o);
   });
-  sel.value = excludedUsers.has(prev) ? '' : prev;
+  if (prev && excludedUsers.has('USER-' + prev)) input.value = '';
 }
 
 // ---- filters ----
@@ -755,10 +784,11 @@ function applyFilters() {
   const excludedUsers = getExcludedUsers();
   updateUserDropdown(excludedUsers);
 
-  const from  = document.getElementById('filter-from').value;
-  const to    = document.getElementById('filter-to').value;
-  const userQ = document.getElementById('filter-user').value;
-  const typeQ = document.getElementById('filter-type').value;
+  const from       = document.getElementById('filter-from').value;
+  const to         = document.getElementById('filter-to').value;
+  const userSuffix = document.getElementById('filter-user').value.trim();
+  const userQ      = userSuffix ? 'USER-' + userSuffix : '';
+  const typeQ      = document.getElementById('filter-type').value;
 
   filteredData = rawData.filter(row => {
     if (excludedUsers.has(row[cols.user])) return false;
@@ -1130,7 +1160,8 @@ function renderDaysActive() {
 }
 
 function renderResonanceOverTime() {
-  const userQ  = document.getElementById('filter-user').value;
+  const userSuffix = document.getElementById('filter-user').value.trim();
+  const userQ      = userSuffix ? 'USER-' + userSuffix : '';
   const events = filteredData.filter(r => {
     const res = parseFloat(r[cols.resonance]);
     return !isNaN(res) && parseDate(r[cols.datetime]);
