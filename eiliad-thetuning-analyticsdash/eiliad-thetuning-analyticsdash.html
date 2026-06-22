@@ -93,6 +93,7 @@
     .btn:hover { opacity: 0.85; }
     .btn-primary { background: var(--accent); color: #fff; }
     .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-alpha { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f59e0b44; }
 
     .field-group label {
       display: block;
@@ -351,6 +352,7 @@
       <label>Registered after</label>
       <input type="datetime-local" id="filter-cohort-after">
     </div>
+    <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
     <button class="btn btn-ghost" id="filter-reset-btn">Reset</button>
   </div>
@@ -783,6 +785,17 @@ function setupFilters() {
     }
   }
 }
+
+document.getElementById('filter-alpha-btn').addEventListener('click', () => {
+  document.getElementById('filter-from').value         = '';
+  document.getElementById('filter-to').value           = '';
+  document.getElementById('filter-user').value         = '';
+  document.getElementById('filter-type').value         = '';
+  document.getElementById('filter-excl-from').value    = '';
+  document.getElementById('filter-excl-to').value      = '';
+  document.getElementById('filter-cohort-after').value = '2026-06-22T15:00';
+  applyFilters();
+});
 
 document.getElementById('filter-apply-btn').addEventListener('click', applyFilters);
 document.getElementById('filter-reset-btn').addEventListener('click', () => {
