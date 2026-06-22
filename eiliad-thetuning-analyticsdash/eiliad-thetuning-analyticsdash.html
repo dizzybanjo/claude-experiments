@@ -344,6 +344,13 @@
       <label>To</label>
       <input type="date" id="filter-excl-to">
     </div>
+    <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
+      <label>Cohort: ALPHA TESTERS &mdash; include only users registered after</label>
+    </div>
+    <div class="field-group">
+      <label>Registered after</label>
+      <input type="datetime-local" id="filter-cohort-after">
+    </div>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
     <button class="btn btn-ghost" id="filter-reset-btn">Reset</button>
   </div>
@@ -712,16 +719,24 @@ function resetAll() {
 
 // ---- user dropdown ----
 function getExcludedUsers() {
-  const exclFrom = document.getElementById('filter-excl-from').value;
-  const exclTo   = document.getElementById('filter-excl-to').value;
-  if (!exclFrom && !exclTo) return new Set();
+  const exclFrom    = document.getElementById('filter-excl-from').value;
+  const exclTo      = document.getElementById('filter-excl-to').value;
+  const cohortAfter = document.getElementById('filter-cohort-after').value;
+  if (!exclFrom && !exclTo && !cohortAfter) return new Set();
   const excluded = new Set();
   rawData.forEach(r => {
+    const user = r[cols.user];
+    if (!user) return;
     const reg = parseDate(r['User Registration Date']);
-    if (!reg) return;
-    const afterFrom = !exclFrom || reg >= new Date(exclFrom);
-    const beforeTo  = !exclTo   || reg <= new Date(exclTo + 'T23:59:59');
-    if (afterFrom && beforeTo) excluded.add(r[cols.user]);
+    if ((exclFrom || exclTo) && reg) {
+      const afterFrom = !exclFrom || reg >= new Date(exclFrom);
+      const beforeTo  = !exclTo   || reg <= new Date(exclTo + 'T23:59:59');
+      if (afterFrom && beforeTo) excluded.add(user);
+    }
+    if (cohortAfter) {
+      const threshold = new Date(cohortAfter);
+      if (!reg || reg <= threshold) excluded.add(user);
+    }
   });
   return excluded;
 }
@@ -771,12 +786,13 @@ function setupFilters() {
 
 document.getElementById('filter-apply-btn').addEventListener('click', applyFilters);
 document.getElementById('filter-reset-btn').addEventListener('click', () => {
-  document.getElementById('filter-from').value      = '';
-  document.getElementById('filter-to').value        = '';
-  document.getElementById('filter-user').value      = '';
-  document.getElementById('filter-type').value      = '';
-  document.getElementById('filter-excl-from').value = '';
-  document.getElementById('filter-excl-to').value   = '';
+  document.getElementById('filter-from').value         = '';
+  document.getElementById('filter-to').value           = '';
+  document.getElementById('filter-user').value         = '';
+  document.getElementById('filter-type').value         = '';
+  document.getElementById('filter-excl-from').value    = '';
+  document.getElementById('filter-excl-to').value      = '';
+  document.getElementById('filter-cohort-after').value = '';
   applyFilters();
 });
 
