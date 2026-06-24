@@ -275,6 +275,26 @@
       min-width: 0;
       width: auto;
     }
+
+    .excl-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .excl-tag .remove {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1;
+      margin-left: 2px;
+    }
+    .excl-tag .remove:hover { color: var(--rose); }
   </style>
 </head>
 <body>
@@ -344,6 +364,20 @@
     <div class="field-group">
       <label>To</label>
       <input type="date" id="filter-excl-to">
+    </div>
+    <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
+      <label>Exclude specific users</label>
+    </div>
+    <div class="field-group" style="flex: 2; min-width: 280px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="user-input-wrap" style="flex:1;">
+          <span class="user-prefix">USER-</span>
+          <input type="text" id="filter-excl-user-input" placeholder="type ID…" list="excl-user-datalist">
+        </div>
+        <button class="btn btn-ghost" id="excl-user-add-btn" style="white-space:nowrap; flex-shrink:0; padding:8px 12px;">+ Add</button>
+      </div>
+      <datalist id="excl-user-datalist"></datalist>
+      <div id="excl-user-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
     </div>
     <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
       <label>Cohort: ALPHA TESTERS &mdash; include only users registered after</label>
@@ -709,6 +743,7 @@ function showBadge(name, rows) {
 
 function resetAll() {
   rawData = []; filteredData = []; sessionData = [];
+  specificExclUsers.clear();
   fileInput.value = '';
   uploadZone.style.display = '';
   document.getElementById('file-badge').classList.remove('visible');
@@ -719,13 +754,43 @@ function resetAll() {
   charts = {};
 }
 
+// ---- specific user exclusions ----
+let specificExclUsers = new Set();
+
+function renderExclTags() {
+  const container = document.getElementById('excl-user-tags');
+  if (!container) return;
+  container.innerHTML = '';
+  specificExclUsers.forEach(u => {
+    const suffix = u.startsWith('USER-') ? u.slice(5) : u;
+    const tag = document.createElement('span');
+    tag.className = 'excl-tag';
+    tag.innerHTML = `USER-${suffix} <span class="remove" data-user="${u}">&times;</span>`;
+    tag.querySelector('.remove').addEventListener('click', () => {
+      specificExclUsers.delete(u);
+      renderExclTags();
+      applyFilters();
+    });
+    container.appendChild(tag);
+  });
+}
+
+function addExclUser(suffix) {
+  if (!suffix) return;
+  const full = suffix.startsWith('USER-') ? suffix : 'USER-' + suffix;
+  specificExclUsers.add(full);
+  renderExclTags();
+  document.getElementById('filter-excl-user-input').value = '';
+  applyFilters();
+}
+
 // ---- user dropdown ----
 function getExcludedUsers() {
   const exclFrom    = document.getElementById('filter-excl-from').value;
   const exclTo      = document.getElementById('filter-excl-to').value;
   const cohortAfter = document.getElementById('filter-cohort-after').value;
-  if (!exclFrom && !exclTo && !cohortAfter) return new Set();
-  const excluded = new Set();
+  const excluded = new Set(specificExclUsers);
+  if (!exclFrom && !exclTo && !cohortAfter) return excluded;
   rawData.forEach(r => {
     const user = r[cols.user];
     if (!user) return;
@@ -746,20 +811,34 @@ function getExcludedUsers() {
 function updateUserDropdown(excludedUsers) {
   const input = document.getElementById('filter-user');
   const datalist = document.getElementById('user-datalist');
+  const exclDatalist = document.getElementById('excl-user-datalist');
   const prev = input.value;
   const userMap = {};
   rawData.forEach(r => {
     const u = r[cols.user];
-    if (u && !userMap[u] && !excludedUsers.has(u))
+    if (u && !userMap[u])
       userMap[u] = r['User Registration Date'] || '';
   });
+  const sortedUsers = Object.keys(userMap).sort((a, b) => new Date(userMap[b]) - new Date(userMap[a]));
+
   datalist.innerHTML = '';
-  Object.keys(userMap).sort((a, b) => new Date(userMap[b]) - new Date(userMap[a])).forEach(u => {
+  sortedUsers.filter(u => !excludedUsers.has(u)).forEach(u => {
     const suffix = u.startsWith('USER-') ? u.slice(5) : u;
     const o = document.createElement('option');
     o.value = suffix;
     datalist.appendChild(o);
   });
+
+  if (exclDatalist) {
+    exclDatalist.innerHTML = '';
+    sortedUsers.forEach(u => {
+      const suffix = u.startsWith('USER-') ? u.slice(5) : u;
+      const o = document.createElement('option');
+      o.value = suffix;
+      exclDatalist.appendChild(o);
+    });
+  }
+
   if (prev && excludedUsers.has('USER-' + prev)) input.value = '';
 }
 
@@ -786,6 +865,13 @@ function setupFilters() {
   }
 }
 
+document.getElementById('excl-user-add-btn').addEventListener('click', () => {
+  addExclUser(document.getElementById('filter-excl-user-input').value.trim());
+});
+document.getElementById('filter-excl-user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addExclUser(e.target.value.trim()); }
+});
+
 document.getElementById('filter-alpha-btn').addEventListener('click', () => {
   document.getElementById('filter-from').value         = '';
   document.getElementById('filter-to').value           = '';
@@ -794,6 +880,8 @@ document.getElementById('filter-alpha-btn').addEventListener('click', () => {
   document.getElementById('filter-excl-from').value    = '';
   document.getElementById('filter-excl-to').value      = '';
   document.getElementById('filter-cohort-after').value = '2026-06-22T15:00';
+  specificExclUsers.add('USER-ECDMKD');
+  renderExclTags();
   applyFilters();
 });
 
@@ -806,6 +894,8 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   document.getElementById('filter-excl-from').value    = '';
   document.getElementById('filter-excl-to').value      = '';
   document.getElementById('filter-cohort-after').value = '';
+  specificExclUsers.clear();
+  renderExclTags();
   applyFilters();
 });
 
