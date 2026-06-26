@@ -689,8 +689,10 @@ function buildDeltaMap(events) {
       const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
       if (match) {
         usedEnds.add(match);
+        const delta = match.res - start.res;
+        if (delta < 0) return;
         if (!deltaMap[entity]) deltaMap[entity] = [];
-        deltaMap[entity].push(match.res - start.res);
+        deltaMap[entity].push(delta);
       }
     });
   });
@@ -1433,9 +1435,11 @@ function renderActivityResonanceTrend() {
       const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
       if (match) {
         usedEnds.add(match);
+        const delta = match.res - start.res;
+        if (delta < 0) return;
         const bucket = getBucket(start.dt);
         if (!activityData[activity][bucket]) activityData[activity][bucket] = [];
-        activityData[activity][bucket].push(match.res - start.res);
+        activityData[activity][bucket].push(delta);
       }
     });
   });
