@@ -726,8 +726,7 @@ function handleFile(file) {
       rawData = results.data;
       showBadge(file.name, rawData.length);
       setupFilters();
-      renderExclTags();
-      applyFilters();
+      document.getElementById('filter-alpha-btn').click();
       document.getElementById('filters-bar').classList.add('visible');
       document.getElementById('stats-row').classList.add('visible');
       document.getElementById('charts-wrapper').classList.add('visible');
