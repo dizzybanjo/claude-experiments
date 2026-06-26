@@ -724,6 +724,7 @@ function handleFile(file) {
       rawData = results.data;
       showBadge(file.name, rawData.length);
       setupFilters();
+      renderExclTags();
       applyFilters();
       document.getElementById('filters-bar').classList.add('visible');
       document.getElementById('stats-row').classList.add('visible');
@@ -744,6 +745,7 @@ function showBadge(name, rows) {
 function resetAll() {
   rawData = []; filteredData = []; sessionData = [];
   specificExclUsers.clear();
+  saveExclUsers();
   fileInput.value = '';
   uploadZone.style.display = '';
   document.getElementById('file-badge').classList.remove('visible');
@@ -755,7 +757,15 @@ function resetAll() {
 }
 
 // ---- specific user exclusions ----
-let specificExclUsers = new Set();
+const EXCL_USERS_KEY = 'eiliad_excl_users';
+let specificExclUsers = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem(EXCL_USERS_KEY) || '[]')); }
+  catch(e) { return new Set(); }
+})();
+
+function saveExclUsers() {
+  localStorage.setItem(EXCL_USERS_KEY, JSON.stringify([...specificExclUsers]));
+}
 
 function renderExclTags() {
   const container = document.getElementById('excl-user-tags');
@@ -768,6 +778,7 @@ function renderExclTags() {
     tag.innerHTML = `USER-${suffix} <span class="remove" data-user="${u}">&times;</span>`;
     tag.querySelector('.remove').addEventListener('click', () => {
       specificExclUsers.delete(u);
+      saveExclUsers();
       renderExclTags();
       applyFilters();
     });
@@ -779,6 +790,7 @@ function addExclUser(suffix) {
   if (!suffix) return;
   const full = suffix.startsWith('USER-') ? suffix : 'USER-' + suffix;
   specificExclUsers.add(full);
+  saveExclUsers();
   renderExclTags();
   document.getElementById('filter-excl-user-input').value = '';
   applyFilters();
@@ -881,6 +893,7 @@ document.getElementById('filter-alpha-btn').addEventListener('click', () => {
   document.getElementById('filter-excl-to').value      = '';
   document.getElementById('filter-cohort-after').value = '2026-06-22T15:00';
   specificExclUsers.add('USER-ECDMKD');
+  saveExclUsers();
   renderExclTags();
   applyFilters();
 });
@@ -895,6 +908,7 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   document.getElementById('filter-excl-to').value      = '';
   document.getElementById('filter-cohort-after').value = '';
   specificExclUsers.clear();
+  saveExclUsers();
   renderExclTags();
   applyFilters();
 });
