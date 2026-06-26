@@ -94,6 +94,8 @@
     .btn-primary { background: var(--accent); color: #fff; }
     .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn-alpha { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f59e0b44; }
+    .btn-cheat { background: linear-gradient(135deg, #f87171, #dc2626); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f8717144; }
+    .btn-cheat.active { box-shadow: 0 0 20px #f87171bb; outline: 2px solid #f87171; outline-offset: 2px; }
 
     .field-group label {
       display: block;
@@ -387,6 +389,7 @@
       <input type="datetime-local" id="filter-cohort-after">
     </div>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
+    <button class="btn btn-cheat" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
     <button class="btn btn-ghost" id="filter-reset-btn">Reset</button>
   </div>
@@ -637,6 +640,8 @@ let rawData = [];
 let filteredData = [];
 let charts = {};
 let sessionData = [];
+let filterCheatDev = false;
+let detectedCheats = new Set();
 
 const cols = {
   user:      'User ID',
@@ -649,6 +654,29 @@ const cols = {
 
 // ---- colour palette ----
 const PALETTE = ['#6c63ff','#34d399','#fbbf24','#f87171','#60a5fa','#a78bfa','#fb923c','#4ade80'];
+
+// ---- state / chapter unlock conditions ----
+// "day" = minimum unique active days the user must have to enter that state/chapter
+const STATE_CONDITIONS = [
+  null,
+  { toEnterState: 1,  conditions: {} },
+  { toEnterState: 2,  conditions: { chapterCompleted: 1 } },
+  { toEnterState: 3,  conditions: { chapterCompleted: 2, day: 2 } },
+  { toEnterState: 4,  conditions: { chapterCompleted: 3 } },
+  { toEnterState: 5,  conditions: { chapterCompleted: 4, day: 3 } },
+  { toEnterState: 6,  conditions: { chapterCompleted: 5 } },
+  { toEnterState: 7,  conditions: { chapterCompleted: 6 } },
+  { toEnterState: 8,  conditions: { chapterCompleted: 7, day: 4 } },
+  { toEnterState: 9,  conditions: { chapterCompleted: 8, day: 5 } },
+  { toEnterState: 10, conditions: { chapterCompleted: 9, day: 6 } },
+  { toEnterState: 11, conditions: { chapterCompleted: 10 } },
+  { toEnterState: 12, conditions: { chapterCompleted: 11, day: 7 } },
+  { toEnterState: 13, conditions: { chapterCompleted: 12 } },
+  { toEnterState: 14, conditions: { chapterCompleted: 13, day: 8 } },
+  { toEnterState: 15, conditions: { chapterCompleted: 14, day: 9 } },
+  { toEnterState: 16, conditions: { chapterCompleted: 15, day: 10 } },
+  { toEnterState: 17, conditions: { chapterCompleted: 16 } },
+];
 
 const ACTIVITIES     = ['breathing', 'meditation', 'nature'];
 const EXTRAS         = ['rain', 'stargazing'];
@@ -914,7 +942,72 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   applyFilters();
 });
 
+// ---- cheat / dev detection ----
+function detectCheatUsers(data) {
+  // Build a map: stateNumber -> minimum unique active days required
+  const dayReq = {};
+  STATE_CONDITIONS.forEach(sc => {
+    if (sc && sc.conditions && sc.conditions.day) {
+      dayReq[sc.toEnterState] = sc.conditions.day;
+    }
+  });
+
+  // Unique active calendar days per user across all their events
+  const userActiveDays = {};
+  data.forEach(r => {
+    const user = r[cols.user];
+    const dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    if (!userActiveDays[user]) userActiveDays[user] = new Set();
+    userActiveDays[user].add(dt.toISOString().slice(0, 10));
+  });
+
+  // Highest chapter number each user has ever entered
+  const chapterEvents = data.filter(r => (r[cols.type] || '').toLowerCase().includes('chapter'));
+  const userMaxChapter = {};
+  chapterEvents.forEach(r => {
+    const user = r[cols.user];
+    const entity = r[cols.entity] || '';
+    const m = entity.match(/(\d+)/);
+    if (!m) return;
+    const n = parseInt(m[1], 10);
+    if (!userMaxChapter[user] || n > userMaxChapter[user]) userMaxChapter[user] = n;
+  });
+
+  const cheats = new Set();
+  Object.entries(userMaxChapter).forEach(([user, maxCh]) => {
+    // The minimum unique days needed to legitimately reach maxCh is the
+    // highest day-gate among all states 1..maxCh
+    let minRequired = 0;
+    for (let ch = 1; ch <= maxCh; ch++) {
+      if (dayReq[ch] && dayReq[ch] > minRequired) minRequired = dayReq[ch];
+    }
+    if (!minRequired) return;
+    const activeDays = userActiveDays[user] ? userActiveDays[user].size : 0;
+    if (activeDays < minRequired) cheats.add(user);
+  });
+
+  return cheats;
+}
+
+function updateCheatBtn() {
+  const btn = document.getElementById('filter-cheat-btn');
+  if (!btn) return;
+  const count = detectedCheats.size;
+  btn.textContent = count > 0 ? `Filter Cheat/Dev (${count})` : 'Filter Cheat/Dev';
+}
+
+document.getElementById('filter-cheat-btn').addEventListener('click', () => {
+  filterCheatDev = !filterCheatDev;
+  document.getElementById('filter-cheat-btn').classList.toggle('active', filterCheatDev);
+  applyFilters();
+});
+
 function applyFilters() {
+  // Always recompute detected cheats from the full raw dataset
+  detectedCheats = detectCheatUsers(rawData);
+  updateCheatBtn();
+
   const excludedUsers = getExcludedUsers();
   updateUserDropdown(excludedUsers);
 
@@ -926,6 +1019,7 @@ function applyFilters() {
 
   filteredData = rawData.filter(row => {
     if (excludedUsers.has(row[cols.user])) return false;
+    if (filterCheatDev && detectedCheats.has(row[cols.user])) return false;
     if (userQ && row[cols.user] !== userQ) return false;
     if (typeQ && (row[cols.type] || '') !== typeQ) return false;
     if ((from || to) && cols.datetime) {
