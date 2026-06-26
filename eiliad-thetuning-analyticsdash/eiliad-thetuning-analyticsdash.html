@@ -761,8 +761,8 @@ function resetAll() {
 // ---- specific user exclusions ----
 const EXCL_USERS_KEY = 'eiliad_excl_users';
 let specificExclUsers = (() => {
-  try { return new Set(JSON.parse(localStorage.getItem(EXCL_USERS_KEY) || '[]')); }
-  catch(e) { return new Set(); }
+  try { return new Set(['USER-GVUGDH', ...JSON.parse(localStorage.getItem(EXCL_USERS_KEY) || '[]')]); }
+  catch(e) { return new Set(['USER-GVUGDH']); }
 })();
 
 function saveExclUsers() {
