@@ -691,6 +691,16 @@ function isEndAction(val) {
   const v = (val || '').toLowerCase();
   return END_KEYWORDS.some(k => v.includes(k));
 }
+function isValidEndForStart(startDt, endDt) {
+  if (endDt < startDt) return false;
+  if (startDt.getHours() >= 23) {
+    const nextDayBefore1am = new Date(startDt);
+    nextDayBefore1am.setDate(nextDayBefore1am.getDate() + 1);
+    nextDayBefore1am.setHours(1, 0, 0, 0);
+    return endDt <= nextDayBefore1am;
+  }
+  return endDt.toDateString() === startDt.toDateString();
+}
 
 // Pair start→end events per user+entity and return { entityName -> [delta, ...] }
 function buildDeltaMap(events) {
@@ -714,7 +724,7 @@ function buildDeltaMap(events) {
     ends.sort((a, b) => a.dt - b.dt);
     const usedEnds = new Set();
     starts.forEach(start => {
-      const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
+      const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
       if (match) {
         usedEnds.add(match);
         const delta = match.res - start.res;
@@ -1312,7 +1322,7 @@ function buildDurationMap(events) {
     ends.sort((a,b) => a.dt - b.dt);
     const usedEnds = new Set();
     starts.forEach(start => {
-      const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
+      const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
       if (match) {
         usedEnds.add(match);
         if (!dMap[entity]) dMap[entity] = [];
@@ -1525,7 +1535,7 @@ function renderActivityResonanceTrend() {
     ends.sort((a, b) => a.dt - b.dt);
     const usedEnds = new Set();
     starts.forEach(start => {
-      const match = ends.find(e => !usedEnds.has(e) && e.dt >= start.dt);
+      const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
       if (match) {
         usedEnds.add(match);
         const delta = match.res - start.res;
