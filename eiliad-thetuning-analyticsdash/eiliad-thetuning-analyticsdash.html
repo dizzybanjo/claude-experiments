@@ -392,7 +392,7 @@
       <label>Registered after</label>
       <input type="datetime-local" id="filter-cohort-after">
     </div>
-    <button class="btn btn-alpha active" id="filter-alpha-btn">Alpha Users</button>
+    <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
@@ -645,6 +645,7 @@ let rawData = [];
 let filteredData = [];
 let charts = {};
 let sessionData = [];
+let filterAlpha = false;
 let filterCheatDev = true;
 let detectedCheats = new Set();
 let filterQualitySessions = true;
@@ -934,14 +935,15 @@ document.getElementById('filter-excl-user-input').addEventListener('keydown', e 
 });
 
 document.getElementById('filter-alpha-btn').addEventListener('click', () => {
-  document.getElementById('filter-from').value         = '';
-  document.getElementById('filter-to').value           = '';
-  document.getElementById('filter-user').value         = '';
-  document.getElementById('filter-type').value         = '';
-  document.getElementById('filter-excl-from').value    = '';
-  document.getElementById('filter-excl-to').value      = '';
-  document.getElementById('filter-cohort-after').value = '2026-06-22T15:00';
-  specificExclUsers.add('USER-ECDMKD');
+  filterAlpha = !filterAlpha;
+  document.getElementById('filter-alpha-btn').classList.toggle('active', filterAlpha);
+  if (filterAlpha) {
+    document.getElementById('filter-cohort-after').value = '2026-06-22T15:00';
+    specificExclUsers.add('USER-ECDMKD');
+  } else {
+    document.getElementById('filter-cohort-after').value = '';
+    specificExclUsers.delete('USER-ECDMKD');
+  }
   saveExclUsers();
   renderExclTags();
   applyFilters();
@@ -959,6 +961,8 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   specificExclUsers.clear();
   saveExclUsers();
   renderExclTags();
+  filterAlpha = false;
+  document.getElementById('filter-alpha-btn').classList.remove('active');
   applyFilters();
 });
 
@@ -2227,6 +2231,20 @@ function restoreVisibilityState() {
     }
   });
 }
+
+// ---- auto-load latest CSV when served via serve.py ----
+(async function tryAutoLoad() {
+  try {
+    const res = await fetch('/api/latest-csv');
+    if (!res.ok) return;
+    const { file } = await res.json();
+    if (!file) return;
+    const csvRes = await fetch('/' + file.split('/').map(encodeURIComponent).join('/'));
+    if (!csvRes.ok) return;
+    const blob = await csvRes.blob();
+    handleFile(new File([blob], file, { type: 'text/csv' }));
+  } catch(e) { /* not running via serve.py — normal upload UI shown */ }
+})();
 </script>
 </body>
 </html>
