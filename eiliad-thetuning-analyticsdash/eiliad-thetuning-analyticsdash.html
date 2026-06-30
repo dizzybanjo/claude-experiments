@@ -1884,10 +1884,12 @@ function buildAppSessions(data) {
     }
   });
 
+  const MAX_SESSION_MS = 4 * 60 * 60 * 1000;
   const sessions = [];
   Object.values(bySession).forEach(s => {
     if (!s.opened || !s.user) return;
     const end = s.lastSeen && s.lastSeen >= s.opened ? s.lastSeen : s.opened;
+    if (s.lastSeen && (s.lastSeen - s.opened) > MAX_SESSION_MS) return;
     sessions.push({ user: s.user, start: s.opened, end, length: (end - s.opened) / 60000 });
   });
   return sessions;
