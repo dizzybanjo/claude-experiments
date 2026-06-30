@@ -96,6 +96,8 @@
     .btn-alpha { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f59e0b44; }
     .btn-cheat { background: linear-gradient(135deg, #f87171, #dc2626); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f8717144; }
     .btn-cheat.active { box-shadow: 0 0 20px #f87171bb; outline: 2px solid #f87171; outline-offset: 2px; }
+    .btn-quality { background: linear-gradient(135deg, #34d399, #059669); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #34d39944; }
+    .btn-quality.active { box-shadow: 0 0 20px #34d399bb; outline: 2px solid #34d399; outline-offset: 2px; }
 
     .field-group label {
       display: block;
@@ -391,6 +393,7 @@
     </div>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat" id="filter-cheat-btn">Filter Cheat/Dev</button>
+    <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
     <button class="btn btn-ghost" id="filter-reset-btn">Reset</button>
   </div>
@@ -643,6 +646,7 @@ let charts = {};
 let sessionData = [];
 let filterCheatDev = false;
 let detectedCheats = new Set();
+let filterQualitySessions = true;
 
 const cols = {
   user:      'User ID',
@@ -728,6 +732,10 @@ function buildDeltaMap(events) {
       const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
       if (match) {
         usedEnds.add(match);
+        if (filterQualitySessions) {
+          if (start.res >= 95) return;
+          if ((match.dt - start.dt) < 60000) return;
+        }
         const delta = match.res - start.res;
         if (delta < 0) return;
         if (!deltaMap[entity]) deltaMap[entity] = [];
@@ -1011,6 +1019,12 @@ function updateCheatBtn() {
 document.getElementById('filter-cheat-btn').addEventListener('click', () => {
   filterCheatDev = !filterCheatDev;
   document.getElementById('filter-cheat-btn').classList.toggle('active', filterCheatDev);
+  applyFilters();
+});
+
+document.getElementById('filter-quality-btn').addEventListener('click', () => {
+  filterQualitySessions = !filterQualitySessions;
+  document.getElementById('filter-quality-btn').classList.toggle('active', filterQualitySessions);
   applyFilters();
 });
 
@@ -1542,6 +1556,10 @@ function renderActivityResonanceTrend() {
       const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
       if (match) {
         usedEnds.add(match);
+        if (filterQualitySessions) {
+          if (start.res >= 95) return;
+          if ((match.dt - start.dt) < 60000) return;
+        }
         const delta = match.res - start.res;
         if (delta < 0) return;
         const bucket = getBucket(start.dt);
