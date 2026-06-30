@@ -94,6 +94,7 @@
     .btn-primary { background: var(--accent); color: #fff; }
     .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn-alpha { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f59e0b44; }
+    .btn-alpha.active { box-shadow: 0 0 20px #f59e0bbb; outline: 2px solid #f59e0b; outline-offset: 2px; }
     .btn-cheat { background: linear-gradient(135deg, #f87171, #dc2626); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #f8717144; }
     .btn-cheat.active { box-shadow: 0 0 20px #f87171bb; outline: 2px solid #f87171; outline-offset: 2px; }
     .btn-quality { background: linear-gradient(135deg, #34d399, #059669); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #34d39944; }
@@ -391,8 +392,8 @@
       <label>Registered after</label>
       <input type="datetime-local" id="filter-cohort-after">
     </div>
-    <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
-    <button class="btn btn-cheat" id="filter-cheat-btn">Filter Cheat/Dev</button>
+    <button class="btn btn-alpha active" id="filter-alpha-btn">Alpha Users</button>
+    <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
     <button class="btn btn-ghost" id="filter-reset-btn">Reset</button>
@@ -644,7 +645,7 @@ let rawData = [];
 let filteredData = [];
 let charts = {};
 let sessionData = [];
-let filterCheatDev = false;
+let filterCheatDev = true;
 let detectedCheats = new Set();
 let filterQualitySessions = true;
 
