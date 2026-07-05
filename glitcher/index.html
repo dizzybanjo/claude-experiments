@@ -20,7 +20,7 @@
       <h1 id="title" class="glitch" data-text="6 1 1 7 C H 3 R">6 1 1 7 C H 3 R</h1>
       <div class="hdr-meta">
         <span class="dim">stochastic glitch sequence synthesizer</span><br>
-        <span class="dim">stereo · 16bit · hard-limited · ikeda/afx/ae</span>
+        <span class="dim">stereo · 16bit · hard-limited</span>
       </div>
     </div>
     <pre class="hdr-deco" aria-hidden="true">╚══════════════════════════════════════════════════════════════╝</pre>
@@ -93,6 +93,18 @@
       </div>
 
       <div class="ctl">
+        <label for="kick">K1CK <span id="kickVal" class="val">55</span></label>
+        <input id="kick" type="range" min="0" max="100" value="55">
+      </div>
+
+      <div class="ctl">
+        <label class="check">
+          <input type="checkbox" id="evolve">
+          3V0LV3 ∞ <span class="dim">— reseed every loop, endless mutation</span>
+        </label>
+      </div>
+
+      <div class="ctl">
         <label for="seed">SEED <span class="dim">(hex · edit + enter)</span></label>
         <input id="seed" type="text" maxlength="8" spellcheck="false" autocomplete="off">
       </div>
@@ -114,6 +126,13 @@
     </section>
 
   </div>
+
+  <section class="panel voice-panel">
+    <div class="panel-tag">┌─[ V01C3 M4TR1X ]── LVL=level PIT=pitch DEC=decay WGT=weight · dblclick=reset
+      <button id="vreset" class="btn tiny">RST ALL</button>
+    </div>
+    <div id="voices" class="voices"></div>
+  </section>
 
   <footer class="ftr dim">
     6117ch3r v1.1 // output chain: drive → comp(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale

@@ -277,6 +277,45 @@ input[type="range"]::-moz-range-thumb {
 
 .keys { font-size: 11px; margin-top: 6px; letter-spacing: 0.04em; }
 
+.check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--ink); cursor: pointer;
+  letter-spacing: 0.05em;
+}
+.check input { accent-color: var(--grn); width: 15px; height: 15px; }
+
+/* ── voice matrix ───────────────────────────────────── */
+.voice-panel .panel-tag { display: flex; align-items: center; gap: 10px; }
+.btn.tiny { font-size: 10px; padding: 2px 8px; margin-left: auto; }
+
+.voices { display: flex; flex-direction: column; gap: 1px; }
+.vrow {
+  display: grid;
+  grid-template-columns: 44px repeat(4, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+.vrow.vhead span {
+  font-size: 10px;
+  color: var(--grn-dim);
+  letter-spacing: 0.15em;
+  text-align: center;
+}
+.vtag {
+  font-size: 11px;
+  color: var(--grn);
+  letter-spacing: 0.08em;
+  cursor: help;
+}
+.vcell input[type="range"] { height: 16px; }
+.vcell input[type="range"]::-webkit-slider-thumb {
+  width: 8px; height: 14px; margin-top: -5px;
+}
+.vcell input[type="range"]::-moz-range-thumb { width: 8px; height: 14px; }
+@media (max-width: 760px) {
+  .vrow { grid-template-columns: 36px repeat(4, 1fr); gap: 4px; }
+}
+
 /* ── log ────────────────────────────────────────────── */
 .log-panel { display: flex; flex-direction: column; }
 .log {
