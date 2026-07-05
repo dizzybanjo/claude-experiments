@@ -1,0 +1,314 @@
+/* ═══════════════════════════════════════════════════════
+   6117CH3R // terminal-datamosh interface
+   ═══════════════════════════════════════════════════════ */
+:root {
+  --bg: #040604;
+  --ink: #c8ffd8;
+  --grn: #46ff8c;
+  --grn-dim: rgba(70, 255, 140, 0.45);
+  --red: #ff2a3c;
+  --cyan: #35e0ff;
+  --panel: rgba(8, 14, 10, 0.82);
+  --border: rgba(70, 255, 140, 0.28);
+  --mono: "SF Mono", "Menlo", "IBM Plex Mono", "Fira Code", monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-x: hidden;
+}
+
+/* ── ambient layers ─────────────────────────────────── */
+#bg {
+  position: fixed; inset: 0;
+  width: 100vw; height: 100vh;
+  z-index: 0;
+  image-rendering: pixelated;
+  opacity: 0.9;
+}
+
+.scanlines {
+  position: fixed; inset: 0; z-index: 3; pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.22) 3px
+  );
+  mix-blend-mode: multiply;
+}
+.scanlines::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(rgba(70,255,140,0.03), rgba(0,0,0,0));
+  animation: sweep 7s linear infinite;
+}
+@keyframes sweep {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.vignette {
+  position: fixed; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(ellipse at center,
+    rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+}
+
+/* ── frame ──────────────────────────────────────────── */
+.frame {
+  position: relative; z-index: 2;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 18px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── header ─────────────────────────────────────────── */
+.hdr-deco {
+  color: var(--grn-dim);
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.hdr-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 10px;
+  flex-wrap: wrap;
+}
+h1 {
+  font-size: clamp(22px, 4.5vw, 38px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #eafff2;
+  text-shadow:
+    0 0 8px rgba(70, 255, 140, 0.55),
+    2px 0 0 rgba(255, 42, 60, 0.55),
+    -2px 0 0 rgba(53, 224, 255, 0.55);
+  animation: hueflick 4s steps(2) infinite;
+}
+@keyframes hueflick {
+  0%, 92%  { transform: translateX(0); }
+  93%      { transform: translateX(2px) skewX(2deg); }
+  95%      { transform: translateX(-2px); }
+  96%,100% { transform: translateX(0); }
+}
+.hdr-meta { text-align: right; font-size: 11px; }
+
+.dim { color: rgba(200, 255, 216, 0.42); }
+
+/* ── panels ─────────────────────────────────────────── */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 10px 12px 12px;
+  position: relative;
+  backdrop-filter: blur(2px);
+}
+.panel::before {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 24px rgba(70, 255, 140, 0.05);
+}
+.panel-tag {
+  color: var(--grn-dim);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ── viz ────────────────────────────────────────────── */
+.viz-panel { padding-bottom: 8px; }
+#viz {
+  display: block;
+  width: 100%;
+  height: 220px;
+  background: #030503;
+  border: 1px solid rgba(70, 255, 140, 0.15);
+}
+
+/* ── sequence grid ──────────────────────────────────── */
+.grid {
+  font-size: 15px;
+  line-height: 1.35;
+  letter-spacing: 2px;
+  word-break: break-all;
+  user-select: none;
+  color: rgba(200, 255, 216, 0.22);
+}
+.cell.hit { color: var(--grn); text-shadow: 0 0 6px rgba(70,255,140,0.6); }
+.cell.barline { border-left: 1px solid rgba(70,255,140,0.25); padding-left: 3px; margin-left: 3px; }
+.cell.ph {
+  background: var(--grn);
+  color: #041007 !important;
+  text-shadow: none;
+}
+
+/* ── columns ────────────────────────────────────────── */
+.cols {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.9fr) 1.1fr;
+  gap: 14px;
+}
+@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+
+/* ── controls ───────────────────────────────────────── */
+.btnrow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: transparent;
+  color: var(--grn);
+  border: 1px solid var(--border);
+  padding: 9px 14px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  transition: background 0.08s, color 0.08s, box-shadow 0.08s;
+}
+.btn:hover {
+  background: rgba(70, 255, 140, 0.12);
+  box-shadow: 0 0 12px rgba(70, 255, 140, 0.25), inset 0 0 8px rgba(70,255,140,0.08);
+}
+.btn:active { transform: translate(1px, 1px); }
+.btn.accent { color: #eafff2; border-color: rgba(255,42,60,0.5); }
+.btn.accent:hover {
+  background: rgba(255, 42, 60, 0.14);
+  box-shadow: 0 0 12px rgba(255, 42, 60, 0.3);
+}
+.btn.active {
+  background: var(--grn);
+  color: #041007;
+  text-shadow: none;
+  animation: pulse 0.9s steps(2) infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(70,255,140,0.4); }
+  50%      { box-shadow: 0 0 18px rgba(70,255,140,0.9); }
+}
+.btn:disabled { opacity: 0.45; cursor: wait; }
+
+.ctl { margin-bottom: 12px; }
+.ctl label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--grn-dim);
+  margin-bottom: 4px;
+}
+.ctl .val { color: var(--grn); }
+
+input[type="number"], input[type="text"], select {
+  font-family: var(--mono);
+  font-size: 14px;
+  width: 100%;
+  background: rgba(3, 6, 4, 0.9);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  outline: none;
+}
+input:focus, select:focus {
+  border-color: var(--grn);
+  box-shadow: 0 0 8px rgba(70, 255, 140, 0.3);
+}
+#seed { letter-spacing: 0.25em; color: var(--cyan); }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: repeating-linear-gradient(
+    to right, var(--grn-dim) 0 4px, transparent 4px 7px);
+  border: 1px solid rgba(70,255,140,0.2);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 20px;
+  margin-top: -8px;
+  background: var(--grn);
+  box-shadow: 0 0 8px rgba(70,255,140,0.7);
+  border: none;
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: repeating-linear-gradient(
+    to right, var(--grn-dim) 0 4px, transparent 4px 7px);
+  border: 1px solid rgba(70,255,140,0.2);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 20px;
+  background: var(--grn);
+  box-shadow: 0 0 8px rgba(70,255,140,0.7);
+  border: none; border-radius: 0;
+}
+
+.radios { display: flex; gap: 16px; padding-top: 2px; }
+.radio {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.radio input { accent-color: var(--grn); }
+
+.keys { font-size: 11px; margin-top: 6px; letter-spacing: 0.04em; }
+
+/* ── log ────────────────────────────────────────────── */
+.log-panel { display: flex; flex-direction: column; }
+.log {
+  flex: 1;
+  min-height: 260px;
+  max-height: 420px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: var(--grn-dim) transparent;
+}
+.logline { color: rgba(200, 255, 216, 0.55); white-space: pre; }
+.logline.gen { color: var(--grn); text-shadow: 0 0 6px rgba(70,255,140,0.4); }
+.logline.sys { color: var(--cyan); }
+.logline.err { color: var(--red); }
+.logline:first-child { animation: linein 0.15s steps(3); }
+@keyframes linein {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── footer ─────────────────────────────────────────── */
+.ftr { font-size: 11px; text-align: center; letter-spacing: 0.04em; }
+
+/* running-state flicker on the whole frame */
+body.running .frame { animation: microjit 6s steps(1) infinite; }
+@keyframes microjit {
+  0%, 96.5%, 100% { transform: none; filter: none; }
+  97%   { transform: translateX(1px); filter: hue-rotate(18deg); }
+  97.6% { transform: translateX(-1px) translateY(1px); }
+  98.2% { transform: none; filter: saturate(1.6); }
+}
+
+::selection { background: var(--grn); color: #041007; }

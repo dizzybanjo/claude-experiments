@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6117CH3R // glitch sequence synthesizer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<div class="scanlines" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<main class="frame">
+
+  <header class="hdr">
+    <pre class="hdr-deco" aria-hidden="true">╔══════════════════════════════════════════════════════════════╗</pre>
+    <div class="hdr-row">
+      <h1 id="title" class="glitch" data-text="6 1 1 7 C H 3 R">6 1 1 7 C H 3 R</h1>
+      <div class="hdr-meta">
+        <span class="dim">stochastic glitch sequence synthesizer</span><br>
+        <span class="dim">stereo · 16bit · hard-limited · ikeda/afx/ae</span>
+      </div>
+    </div>
+    <pre class="hdr-deco" aria-hidden="true">╚══════════════════════════════════════════════════════════════╝</pre>
+  </header>
+
+  <section class="panel viz-panel">
+    <div class="panel-tag">┌─[ SCOPE / SPECTRUM ]─────────</div>
+    <canvas id="viz"></canvas>
+  </section>
+
+  <section class="panel grid-panel">
+    <div class="panel-tag">┌─[ SEQUENCE ]─────────────────</div>
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <div class="cols">
+
+    <section class="panel ctrl-panel">
+      <div class="panel-tag">┌─[ CONTROL ]──────────────────</div>
+
+      <div class="btnrow">
+        <button id="play" class="btn big">▶ PLAY</button>
+        <button id="generate" class="btn big accent">▓ GENERATE ▓</button>
+        <button id="export" class="btn big">◈ EXPORT WAV</button>
+      </div>
+
+      <div class="ctl">
+        <label for="bpm">BPM</label>
+        <input id="bpm" type="number" min="20" max="999" value="132">
+      </div>
+
+      <div class="ctl">
+        <label for="bars">BARS</label>
+        <select id="bars">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="4">4</option>
+          <option value="8">8</option>
+        </select>
+      </div>
+
+      <div class="ctl">
+        <label for="palette">PALETTE</label>
+        <select id="palette">
+          <option value="IKEDA">IKEDA — sine/click minimal</option>
+          <option value="AFX" selected>AFX — subs/zaps/acid</option>
+          <option value="AE">AE — fm/metal/granular</option>
+        </select>
+      </div>
+
+      <div class="ctl">
+        <label for="density">DENSITY <span id="densityVal" class="val">55</span></label>
+        <input id="density" type="range" min="0" max="100" value="55">
+      </div>
+
+      <div class="ctl">
+        <label for="chaos">CHAOS <span id="chaosVal" class="val">45</span></label>
+        <input id="chaos" type="range" min="0" max="100" value="45">
+      </div>
+
+      <div class="ctl">
+        <label for="seed">SEED <span class="dim">(hex · edit + enter)</span></label>
+        <input id="seed" type="text" maxlength="8" spellcheck="false" autocomplete="off">
+      </div>
+
+      <div class="ctl">
+        <label>SAMPLE RATE</label>
+        <div class="radios">
+          <label class="radio"><input type="radio" name="sr" value="44100"> 44.1k</label>
+          <label class="radio"><input type="radio" name="sr" value="48000" checked> 48k</label>
+        </div>
+      </div>
+
+      <div class="keys dim">SPACE run/halt · G generate · E export</div>
+    </section>
+
+    <section class="panel log-panel">
+      <div class="panel-tag">┌─[ EVENT BUS ]────────────────</div>
+      <div id="log" class="log"></div>
+    </section>
+
+  </div>
+
+  <footer class="ftr dim">
+    6117ch3r v1.0 // output chain: comp(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale
+  </footer>
+
+</main>
+
+<script src="app.js" defer></script>
+</body>
+</html>
