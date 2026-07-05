@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
    6 1 1 7 C H 3 R  //  stochastic glitch sequence synthesizer
-   ikeda / afx / ae inspired. stereo. hard-limited. wav export.
+   stereo. hard-limited. wav export.
    ═══════════════════════════════════════════════════════════════════ */
 'use strict';
 
@@ -157,15 +157,33 @@ function generateEvent(rng, type, chaos, stepDur) {
       ev.g = rrange(rng, 0.3, 0.55);
       ev.det = rrange(rng, 3, 25);       // detune cents-ish (Hz offset)
       break;
+    case 'kick':   // pitch-drop sine kick + click transient
+      ev.f0 = rrange(rng, 100, 190);
+      ev.f1 = rrange(rng, 38, 55);
+      ev.dur = rrange(rng, 0.12, 0.28);
+      ev.g = rrange(rng, 0.75, 0.95);
+      ev.clickG = rrange(rng, 0.15, 0.45);
+      ev.pan = 0;
+      ev.jit = 0; // kicks stay on the grid
+      break;
   }
   return ev;
 }
 
-function generatePattern(seed, bpm, bars, density, chaos, palette, repeat) {
+function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick = 0, wgts = null) {
   const rng = mulberry32(seed);
   const steps = bars * 16;
   const stepDur = 60 / bpm / 4;
-  const weights = PALETTES[palette];
+
+  // palette weights scaled by per-voice WGT sliders; drop zeroed voices
+  const base = PALETTES[palette];
+  let weights = {};
+  for (const k in base) {
+    const w = base[k] * (wgts && wgts[k] !== undefined ? wgts[k] : 1);
+    if (w > 0) weights[k] = w;
+  }
+  if (Object.keys(weights).length === 0) weights = Object.assign({}, base);
+
   const events = []; // { step, frac, ...voice params }
   const baseProb = 0.12 + density * 0.72;
 
@@ -189,6 +207,21 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat) {
     events.push(ev);
   }
 
+  /* ── kick layer: quarter-note grid so the beat stays legible ──── */
+  const kickProb = kick * (wgts && wgts.kick !== undefined ? wgts.kick : 1);
+  if (kickProb > 0) {
+    for (let s = 0; s < steps; s += 2) {
+      let p = 0;
+      if (s % 4 === 0) p = s % 16 === 0 ? Math.min(1, kickProb * 1.3) : kickProb * 0.8;
+      else p = kickProb * chaos * 0.18; // occasional offbeat push
+      if (rng() < p) {
+        const ev = generateEvent(rng, 'kick', chaos, stepDur);
+        ev.step = s;
+        events.push(ev);
+      }
+    }
+  }
+
   /* ── beat repeat: capture a slice, restamp it forward ──────────
      Three flavours per pass (chosen by rng): plain echo, pitched
      echo (rising or diving), and roll (slice length halves each
@@ -198,7 +231,8 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat) {
   for (let p = 0; p < passes; p++) {
     const len = rpick(rng, [1, 1, 2, 2, 4]);
     const start = rint(rng, 0, Math.max(0, steps - len * 2));
-    const src = events.filter(e => !e.rep && e.step >= start && e.step < start + len);
+    // kicks are excluded so the pulse never smears
+    const src = events.filter(e => !e.rep && e.type !== 'kick' && e.step >= start && e.step < start + len);
     if (!src.length) continue;
     const reps = rint(rng, 2, 3 + Math.round(chaos * 5));
     const flavour = rng();
@@ -235,7 +269,7 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat) {
   }
   events.sort((a, b) => (a.step + (a.frac || 0)) - (b.step + (b.frac || 0)));
 
-  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, events };
+  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, kick, events };
 }
 
 /* ── shared deterministic noise buffer (per context) ────────────── */
@@ -546,6 +580,25 @@ function scheduleEvent(ctx, dest, ev, when) {
       o1.stop(when + ev.dur + 0.02); o2.stop(when + ev.dur + 0.02);
       break;
     }
+    case 'kick': {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(ev.f0, when);
+      o.frequency.exponentialRampToValueAtTime(ev.f1, when + ev.dur * 0.45);
+      const g = ctx.createGain();
+      env(g.gain, when, ev.g, ev.dur, 0.0012);
+      o.connect(g).connect(out);
+      o.start(when); o.stop(when + ev.dur + 0.05);
+      // click transient for attack definition
+      const c = mkNoise();
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 2800;
+      const cg = ctx.createGain();
+      env(cg.gain, when, ev.clickG, 0.006, 0.0004);
+      c.connect(hp).connect(cg).connect(out);
+      c.start(when); c.stop(when + 0.02);
+      break;
+    }
   }
   return stopAt;
 }
@@ -603,10 +656,50 @@ const state = {
 };
 
 const VOICE_TAGS = {
-  click: 'CLK', blip: 'BLP', noise: 'NSE', hiss: 'HSS', sub: 'SUB',
+  kick: 'KCK', click: 'CLK', blip: 'BLP', noise: 'NSE', hiss: 'HSS', sub: 'SUB',
   zap: 'ZAP', fm: 'FM_', stutter: 'STT', crackle: 'CRK', crush: 'CRH',
   tape: 'TPS', databend: 'DBN', modem: 'MDM', grind: 'GRD',
 };
+const VOICE_NAMES = {
+  kick: 'kick drum', click: 'impulse click', blip: 'sine blip', noise: 'noise burst',
+  hiss: 'hiss wash', sub: 'sub drop', zap: 'filter zap', fm: 'fm metal',
+  stutter: 'stutter ratchet', crackle: 'crackle', crush: 'bitcrush tone',
+  tape: 'tape stop', databend: 'databend', modem: 'modem fsk', grind: 'grind saw',
+};
+const VOICE_ORDER = ['kick', 'sub', 'click', 'blip', 'noise', 'hiss', 'zap', 'fm',
+                     'stutter', 'crackle', 'crush', 'tape', 'databend', 'modem', 'grind'];
+
+/* per-voice modifiers: lvl gain ×, pit pitch ×, dec time ×, wgt weight × */
+const voiceParams = {};
+for (const t of VOICE_ORDER) voiceParams[t] = { lvl: 1, pit: 1, dec: 1, wgt: 1 };
+
+const PITCH_KEYS = ['f', 'f0', 'f1', 'c', 'hp', 'bp', 'lp'];
+const TIME_KEYS = ['dur', 'iv', 'sdur'];
+const clampF = (v) => Math.min(18000, Math.max(10, v));
+
+/* applied at schedule time (live + export), so LVL/PIT/DEC react instantly
+   without regenerating the pattern */
+function applyVoiceMods(ev) {
+  const m = voiceParams[ev.type];
+  if (!m || (m.lvl === 1 && m.pit === 1 && m.dec === 1)) return ev;
+  const c = Object.assign({}, ev);
+  if (m.pit !== 1) {
+    for (const k of PITCH_KEYS) if (c[k] !== undefined) c[k] = clampF(c[k] * m.pit);
+    if (c.freqs) c.freqs = c.freqs.map(x => clampF(x * m.pit));
+    if (c.bfs) c.bfs = c.bfs.map(x => clampF(x * m.pit));
+  }
+  if (m.dec !== 1) {
+    for (const k of TIME_KEYS) if (c[k] !== undefined) c[k] *= m.dec;
+    if (c.offs) c.offs = c.offs.map(x => x * m.dec);
+    if (c.segT) c.segT = c.segT.map(x => x * m.dec);
+  }
+  if (m.lvl !== 1) {
+    if (c.g !== undefined) c.g = Math.min(1.2, c.g * m.lvl);
+    if (c.clickG !== undefined) c.clickG = Math.min(1.2, c.clickG * m.lvl);
+    if (c.amps) c.amps = c.amps.map(a => Math.min(1.2, a * m.lvl));
+  }
+  return c;
+}
 
 function currentDrive() {
   return parseInt($('drive').value, 10) / 100;
@@ -634,7 +727,9 @@ function readParams() {
     density: parseInt($('density').value, 10) / 100,
     chaos: parseInt($('chaos').value, 10) / 100,
     repeat: parseInt($('repeat').value, 10) / 100,
+    kick: parseInt($('kick').value, 10) / 100,
     palette: $('palette').value,
+    wgts: Object.fromEntries(VOICE_ORDER.map(t => [t, voiceParams[t].wgt])),
   };
 }
 
@@ -649,7 +744,7 @@ function doGenerate(newSeed) {
   seedField.value = state.seed.toString(16).toUpperCase().padStart(8, '0');
 
   const p = readParams();
-  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat);
+  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat, p.kick, p.wgts);
 
   // step -> events map for the live scheduler
   const map = new Map();
@@ -671,21 +766,28 @@ function doGenerate(newSeed) {
 const LOOKAHEAD = 0.12, TICK_MS = 25;
 
 function schedulerTick() {
-  const ctx = state.ctx, pat = state.pattern;
-  if (!ctx || !pat) return;
+  const ctx = state.ctx;
+  if (!ctx || !state.pattern) return;
   while (state.nextTime < ctx.currentTime + LOOKAHEAD) {
+    const pat = state.pattern; // re-read: evolve may swap it mid-loop
     const evs = state.stepMap.get(state.nextStep);
     if (evs) {
       for (const ev of evs) {
-        const when = state.nextTime + ((ev.frac || 0) + ev.jit) * pat.stepDur;
-        scheduleEvent(ctx, state.master.input, ev, Math.max(when, ctx.currentTime + 0.001));
-        state.flashQueue.push({ time: when, type: ev.type, pan: ev.pan });
-        logLine(fmtEvent(ev), 'ev');
+        const mev = applyVoiceMods(ev);
+        const when = state.nextTime + ((mev.frac || 0) + mev.jit) * pat.stepDur;
+        scheduleEvent(ctx, state.master.input, mev, Math.max(when, ctx.currentTime + 0.001));
+        state.flashQueue.push({ time: when, type: mev.type, pan: mev.pan });
+        logLine(fmtEvent(mev), 'ev');
       }
     }
     state.flashQueue.push({ time: state.nextTime, type: '_step', step: state.nextStep });
     state.nextTime += pat.stepDur;
     state.nextStep = (state.nextStep + 1) % pat.steps;
+    // evolve: reseed + regenerate at every loop boundary
+    if (state.nextStep === 0 && $('evolve').checked) {
+      doGenerate(true);
+      logLine('∞ 3V0LV3 → mutation', 'sys');
+    }
   }
 }
 
@@ -740,8 +842,9 @@ async function exportWav() {
     const master = buildMaster(octx, currentDrive());
     master.out.connect(octx.destination);
     for (const ev of pat.events) {
-      const when = 0.05 + (ev.step + (ev.frac || 0) + ev.jit) * pat.stepDur;
-      scheduleEvent(octx, master.input, ev, Math.max(when, 0));
+      const mev = applyVoiceMods(ev);
+      const when = 0.05 + (mev.step + (mev.frac || 0) + mev.jit) * pat.stepDur;
+      scheduleEvent(octx, master.input, mev, Math.max(when, 0));
     }
     const rendered = await octx.startRendering();
     const blob = encodeWav(rendered);
@@ -847,7 +950,7 @@ function drawViz() {
     state.analyser.getFloatTimeDomainData(timeData);
     state.analyser.getByteFrequencyData(freqData);
 
-    // spectrum: ikeda-style thin columns, bottom half
+    // spectrum: thin columns, bottom half
     const bins = 96;
     const bwd = vw / bins;
     for (let i = 0; i < bins; i++) {
@@ -934,6 +1037,62 @@ setInterval(() => {
   }
 }, 350);
 
+/* ── voice parameter matrix ─────────────────────────────────────── */
+const VP_COLS = [
+  { key: 'lvl', min: 0, max: 200, regen: false },
+  { key: 'pit', min: 25, max: 400, regen: false },
+  { key: 'dec', min: 25, max: 400, regen: false },
+  { key: 'wgt', min: 0, max: 300, regen: true },
+];
+
+function buildVoicePanel() {
+  const host = $('voices');
+  host.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'vrow vhead';
+  head.innerHTML = '<span></span>' +
+    VP_COLS.map(c => `<span>${c.key.toUpperCase()}</span>`).join('');
+  host.appendChild(head);
+
+  for (const t of VOICE_ORDER) {
+    const row = document.createElement('div');
+    row.className = 'vrow';
+    const tag = document.createElement('span');
+    tag.className = 'vtag';
+    tag.textContent = VOICE_TAGS[t];
+    tag.title = VOICE_NAMES[t];
+    row.appendChild(tag);
+    for (const col of VP_COLS) {
+      const wrap = document.createElement('span');
+      wrap.className = 'vcell';
+      const s = document.createElement('input');
+      s.type = 'range';
+      s.min = col.min; s.max = col.max; s.value = 100;
+      s.title = `${VOICE_NAMES[t]} ${col.key.toUpperCase()}: 100% (dblclick=reset)`;
+      s.addEventListener('input', () => {
+        voiceParams[t][col.key] = parseInt(s.value, 10) / 100;
+        s.title = `${VOICE_NAMES[t]} ${col.key.toUpperCase()}: ${s.value}% (dblclick=reset)`;
+      });
+      if (col.regen) s.addEventListener('change', () => regenSameSeed());
+      s.addEventListener('dblclick', () => {
+        s.value = 100;
+        voiceParams[t][col.key] = 1;
+        if (col.regen) regenSameSeed();
+      });
+      wrap.appendChild(s);
+      row.appendChild(wrap);
+    }
+    host.appendChild(row);
+  }
+}
+
+function resetVoices() {
+  for (const t of VOICE_ORDER) voiceParams[t] = { lvl: 1, pit: 1, dec: 1, wgt: 1 };
+  buildVoicePanel();
+  regenSameSeed();
+  logLine('◌ V01C3 params reset', 'sys');
+}
+
 /* ── wire up ────────────────────────────────────────────────────── */
 function bindUi() {
   // release focus after click so SPACE/G/E shortcuts never double-trigger a button
@@ -954,9 +1113,12 @@ function bindUi() {
   $('density').addEventListener('input', () => { $('densityVal').textContent = $('density').value; });
   $('chaos').addEventListener('input', () => { $('chaosVal').textContent = $('chaos').value; });
   $('repeat').addEventListener('input', () => { $('repeatVal').textContent = $('repeat').value; });
+  $('kick').addEventListener('input', () => { $('kickVal').textContent = $('kick').value; });
   $('density').addEventListener('change', () => regenSameSeed());
   $('chaos').addEventListener('change', () => regenSameSeed());
   $('repeat').addEventListener('change', () => regenSameSeed());
+  $('kick').addEventListener('change', () => regenSameSeed());
+  $('vreset').addEventListener('click', resetVoices);
 
   // DRIVE is a live master-bus control: no regen, just retune the gains
   $('drive').addEventListener('input', () => {
@@ -996,6 +1158,7 @@ function regenSameSeed() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  buildVoicePanel();
   bindUi();
   resize();
   $('seed').value = state.seed.toString(16).toUpperCase().padStart(8, '0');

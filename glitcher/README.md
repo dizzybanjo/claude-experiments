@@ -1,15 +1,15 @@
 # 6117CH3R
 
-Stochastic glitch sequence synthesizer — Aphex Twin / Autechre / Ryoji Ikeda inspired.
+Stochastic glitch sequence synthesizer.
 Pure Web Audio, zero dependencies. Open `index.html` in any modern browser.
 
 ## What it does
 
-Generates seeded, deterministic glitch percussion sequences from fourteen
-synthesized voice types (clicks, sine blips, filtered noise, hiss, sub drops,
-zaps, FM metal, stutter ratchets, vinyl crackle, bitcrush tones, tape-stop
-plunges, databend buffer corruption, modem FSK chatter, overdriven grind),
-weighted by four palettes:
+Generates seeded, deterministic glitch percussion sequences from fifteen
+synthesized voice types (kick drum, clicks, sine blips, filtered noise, hiss,
+sub drops, zaps, FM metal, stutter ratchets, vinyl crackle, bitcrush tones,
+tape-stop plunges, databend buffer corruption, modem FSK chatter, overdriven
+grind), weighted by four palettes:
 
 - **V01D** — minimal high-sine blips, clicks, crackle, subs
 - **4C1D** — subs, zaps, acid stutters, FM hits, grind
@@ -28,6 +28,9 @@ weighted by four palettes:
 | CHAOS | timing jitter, ratchets, param extremes, doubled hits |
 | B34T R3P34T | beat-repeat amount: slices of the pattern get echoed forward as plain repeats, pitched (rising/diving) repeats, or halving-length rolls |
 | DR1V3 | master-bus distortion (level-compensated tanh stage, pre-limiter; live control, also baked into exports) |
+| K1CK | kick-drum amount — pitch-drop sine kicks on the quarter-note grid (never jittered, never beat-repeated) to keep the pulse legible |
+| 3V0LV3 ∞ | reseeds and regenerates the pattern at every loop boundary — endless mutation |
+| V01C3 M4TR1X | per-voice LVL (level ×0–2), PIT (pitch ×0.25–4), DEC (decay/time ×0.25–4), WGT (probability weight ×0–3) for all 15 voices; LVL/PIT/DEC apply instantly, WGT regenerates; double-click any slider to reset |
 | SAMPLE RATE | 44.1 kHz or 48 kHz (live + export) |
 | EXPORT WAV | offline-renders the sequence to stereo 16-bit PCM WAV |
 
