@@ -585,6 +585,11 @@
       </div>
       <div class="charts-grid">
         <div class="chart-card">
+          <h3>Average Session Length</h3>
+          <p class="sub">Mean session duration across all users in the selection (minutes)</p>
+          <div class="chart-wrap"><canvas id="chart-session-length-avg"></canvas></div>
+        </div>
+        <div class="chart-card">
           <h3>Avg Session Length per User</h3>
           <p class="sub">Mean session duration per user (minutes)</p>
           <div class="chart-wrap"><canvas id="chart-session-length-user"></canvas></div>
@@ -1911,21 +1916,26 @@ function buildAppSessions(data) {
     }
   });
 
-  const MAX_SESSION_MS = 4 * 60 * 60 * 1000;
   const sessions = [];
   Object.values(bySession).forEach(s => {
     if (!s.opened || !s.user) return;
+    if (s.lastSeen && s.lastSeen >= s.opened && !isValidEndForStart(s.opened, s.lastSeen)) return;
     const end = s.lastSeen && s.lastSeen >= s.opened ? s.lastSeen : s.opened;
-    if (s.lastSeen && (s.lastSeen - s.opened) > MAX_SESSION_MS) return;
-    sessions.push({ user: s.user, start: s.opened, end, length: (end - s.opened) / 60000 });
+    const length = (end - s.opened) / 60000;
+    if (filterQualitySessions && length < 1) return;
+    sessions.push({ user: s.user, start: s.opened, end, length });
   });
   return sessions;
 }
 
 // ---- session charts ----
 function renderSessionCharts() {
-  const SESSION_CHART_IDS = ['chart-session-length-user','chart-session-length-time','chart-session-freq','chart-sessions-per-week'];
+  const SESSION_CHART_IDS = ['chart-session-length-avg','chart-session-length-user','chart-session-length-time','chart-session-freq','chart-sessions-per-week'];
   if (!sessionData.length) { SESSION_CHART_IDS.forEach(id => destroyChart(id)); return; }
+
+  // Average session length across all users
+  const overallAvg = sessionData.reduce((a, s) => a + s.length, 0) / sessionData.length;
+  renderBarChart('chart-session-length-avg', ['All Users'], [+overallAvg.toFixed(1)], [PALETTE[0]], 'mins');
 
   // Avg session length per user
   const userLengths = {};
