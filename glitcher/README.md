@@ -31,6 +31,9 @@ grind), weighted by four palettes:
 | K1CK | kick-drum amount — pitch-drop sine kicks on the quarter-note grid (never jittered, never beat-repeated) to keep the pulse legible |
 | 3V0LV3 ∞ | reseeds and regenerates the pattern at every loop boundary — endless mutation |
 | V01C3 M4TR1X | per-voice LVL (level ×0–2), PIT (pitch ×0.25–4), DEC (decay/time ×0.25–4), WGT (probability weight ×0–3) for all 15 voices; LVL/PIT/DEC apply instantly, WGT regenerates; double-click any slider to reset |
+| BUS C0MP | master glue compressor (4:1, 10 ms/150 ms) — amount deepens threshold −2→−24 dB with auto makeup |
+| T4P3 S4T | tape saturation — gentle compensated tanh plus head-rolloff lowpass (18 kHz→9 kHz) |
+| H1-SH3LF CUT | high-shelf at 5.5 kHz, 0 to −24 dB — tames the harsh top end |
 | SAMPLE RATE | 44.1 kHz or 48 kHz (live + export) |
 | EXPORT WAV | offline-renders the sequence to stereo 16-bit PCM WAV |
 
@@ -38,9 +41,12 @@ Keyboard: `SPACE` play/stop · `G` generate · `E` export.
 
 ## Audio safety
 
-Master chain: gain → drive (compensated tanh) → compressor (20:1, −6 dB
-threshold, 2 ms attack) → tanh soft-clip → brickwall clamp at ±0.97
-(≈ −0.26 dBFS), 4× oversampled.
+Master chain: gain → drive (compensated tanh) → glue compressor (4:1) →
+tape saturation (compensated tanh + rolloff) → high shelf → safety
+compressor (20:1, −6 dB threshold, 2 ms attack) → tanh soft-clip →
+brickwall clamp at ±0.97 (≈ −0.26 dBFS), 4× oversampled. The tone stages
+sit before the fixed safety stages, so no setting can push the output
+past full scale.
 Nothing reaching your ears or the WAV file can exceed full scale.
 
 ## Export

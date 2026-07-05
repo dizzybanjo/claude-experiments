@@ -315,18 +315,30 @@ function getCrushCurve(levels) {
   return c;
 }
 
-/* ── master chain: gain -> drive -> compressor -> brickwall clip ── */
+/* ── master chain ─────────────────────────────────────────────────
+   input → drive → glue comp → tape sat → hi-shelf → safety comp → clip
+   The last two stages are fixed and guarantee output never exceeds
+   full scale; everything before them is user-shaped tone. */
 function driveGains(drive01) {
   const pre = 1 + drive01 * 11;
   return { pre, post: 1 / Math.pow(pre, 0.55) };
 }
+function tapeGains(tape01) {
+  const pre = 1 + tape01 * 3;
+  return { pre, post: 1 / Math.pow(pre, 0.6) };
+}
+function glueSettings(glue01) {
+  return { threshold: -2 - glue01 * 22, makeup: 1 + glue01 * 0.9 };
+}
+const SHELF_FREQ = 5500;
+const tapeLPFreq = (tape01) => 18000 - tape01 * 9000; // head rolloff 18k→9k
 
-function buildMaster(ctx, drive01 = 0) {
+function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
   const input = ctx.createGain();
   input.gain.value = 0.8;
 
   // DRIVE: variable pre-gain into a fixed tanh stage, level-compensated.
-  const dg = driveGains(drive01);
+  const dg = driveGains(ms.drive);
   const preDrive = ctx.createGain();
   preDrive.gain.value = dg.pre;
   const driveShaper = ctx.createWaveShaper();
@@ -335,6 +347,38 @@ function buildMaster(ctx, drive01 = 0) {
   const postDrive = ctx.createGain();
   postDrive.gain.value = dg.post;
 
+  // GLUE: musical bus compressor (amount = threshold depth + makeup)
+  const gs = glueSettings(ms.glue);
+  const busComp = ctx.createDynamicsCompressor();
+  busComp.threshold.value = gs.threshold;
+  busComp.knee.value = 6;
+  busComp.ratio.value = 4;
+  busComp.attack.value = 0.01;
+  busComp.release.value = 0.15;
+  const makeup = ctx.createGain();
+  makeup.gain.value = gs.makeup;
+
+  // TAPE: gentle tanh saturation + high rolloff, level-compensated
+  const tg = tapeGains(ms.tape);
+  const preTape = ctx.createGain();
+  preTape.gain.value = tg.pre;
+  const tapeShaper = ctx.createWaveShaper();
+  tapeShaper.curve = getDriveCurve(1.5);
+  tapeShaper.oversample = '2x';
+  const postTape = ctx.createGain();
+  postTape.gain.value = tg.post;
+  const tapeLP = ctx.createBiquadFilter();
+  tapeLP.type = 'lowpass';
+  tapeLP.frequency.value = tapeLPFreq(ms.tape);
+  tapeLP.Q.value = 0.5;
+
+  // HI-SHELF: tames harsh top end, cut only
+  const shelf = ctx.createBiquadFilter();
+  shelf.type = 'highshelf';
+  shelf.frequency.value = SHELF_FREQ;
+  shelf.gain.value = -ms.shelfCut;
+
+  // SAFETY: fixed limiter compressor
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -6;
   comp.knee.value = 2;
@@ -357,8 +401,11 @@ function buildMaster(ctx, drive01 = 0) {
   out.gain.value = 0.95;
 
   input.connect(preDrive).connect(driveShaper).connect(postDrive)
+       .connect(busComp).connect(makeup)
+       .connect(preTape).connect(tapeShaper).connect(postTape).connect(tapeLP)
+       .connect(shelf)
        .connect(comp).connect(clip).connect(out);
-  return { input, out, preDrive, postDrive };
+  return { input, out, preDrive, postDrive, busComp, makeup, preTape, postTape, tapeLP, shelf };
 }
 
 /* ── voice scheduling (context-agnostic) ────────────────────────── */
@@ -701,15 +748,38 @@ function applyVoiceMods(ev) {
   return c;
 }
 
-function currentDrive() {
-  return parseInt($('drive').value, 10) / 100;
+function masterSettings() {
+  return {
+    drive: parseInt($('drive').value, 10) / 100,
+    shelfCut: parseInt($('shelf').value, 10),
+    tape: parseInt($('tape').value, 10) / 100,
+    glue: parseInt($('glue').value, 10) / 100,
+  };
+}
+
+/* retune the live master bus in place — no rebuild, no clicks */
+function applyMasterLive() {
+  const m = state.master;
+  if (!m) return;
+  const ms = masterSettings();
+  const dg = driveGains(ms.drive);
+  m.preDrive.gain.value = dg.pre;
+  m.postDrive.gain.value = dg.post;
+  const gs = glueSettings(ms.glue);
+  m.busComp.threshold.value = gs.threshold;
+  m.makeup.gain.value = gs.makeup;
+  const tg = tapeGains(ms.tape);
+  m.preTape.gain.value = tg.pre;
+  m.postTape.gain.value = tg.post;
+  m.tapeLP.frequency.value = tapeLPFreq(ms.tape);
+  m.shelf.gain.value = -ms.shelfCut;
 }
 
 function ensureCtx() {
   if (state.ctx && state.ctx.sampleRate === state.sampleRate) return state.ctx;
   if (state.ctx) state.ctx.close();
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: state.sampleRate });
-  const master = buildMaster(ctx, currentDrive());
+  const master = buildMaster(ctx, masterSettings());
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.55;
@@ -839,7 +909,7 @@ async function exportWav() {
 
   try {
     const octx = new OfflineAudioContext(2, Math.ceil(dur * sr), sr);
-    const master = buildMaster(octx, currentDrive());
+    const master = buildMaster(octx, masterSettings());
     master.out.connect(octx.destination);
     for (const ev of pat.events) {
       const mev = applyVoiceMods(ev);
@@ -1120,15 +1190,14 @@ function bindUi() {
   $('kick').addEventListener('change', () => regenSameSeed());
   $('vreset').addEventListener('click', resetVoices);
 
-  // DRIVE is a live master-bus control: no regen, just retune the gains
-  $('drive').addEventListener('input', () => {
-    $('driveVal').textContent = $('drive').value;
-    if (state.master) {
-      const dg = driveGains(currentDrive());
-      state.master.preDrive.gain.value = dg.pre;
-      state.master.postDrive.gain.value = dg.post;
-    }
-  });
+  // master-bus controls are live: no regen, just retune the chain
+  for (const [id, valId] of [['drive', 'driveVal'], ['shelf', 'shelfVal'],
+                             ['tape', 'tapeVal'], ['glue', 'glueVal']]) {
+    $(id).addEventListener('input', () => {
+      $(valId).textContent = $(id).value;
+      applyMasterLive();
+    });
+  }
 
   document.querySelectorAll('input[name=sr]').forEach(r =>
     r.addEventListener('change', () => {

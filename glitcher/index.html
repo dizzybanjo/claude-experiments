@@ -88,11 +88,6 @@
       </div>
 
       <div class="ctl">
-        <label for="drive">DR1V3 <span id="driveVal" class="val">20</span></label>
-        <input id="drive" type="range" min="0" max="100" value="20">
-      </div>
-
-      <div class="ctl">
         <label for="kick">K1CK <span id="kickVal" class="val">55</span></label>
         <input id="kick" type="range" min="0" max="100" value="55">
       </div>
@@ -102,6 +97,28 @@
           <input type="checkbox" id="evolve">
           3V0LV3 ∞ <span class="dim">— reseed every loop, endless mutation</span>
         </label>
+      </div>
+
+      <div class="subdiv dim">──[ M4ST3R 0UTPUT ]──────────</div>
+
+      <div class="ctl">
+        <label for="drive">DR1V3 <span id="driveVal" class="val">20</span></label>
+        <input id="drive" type="range" min="0" max="100" value="20">
+      </div>
+
+      <div class="ctl">
+        <label for="glue">BUS C0MP <span id="glueVal" class="val">35</span></label>
+        <input id="glue" type="range" min="0" max="100" value="35">
+      </div>
+
+      <div class="ctl">
+        <label for="tape">T4P3 S4T <span id="tapeVal" class="val">25</span></label>
+        <input id="tape" type="range" min="0" max="100" value="25">
+      </div>
+
+      <div class="ctl">
+        <label for="shelf">H1-SH3LF CUT <span id="shelfVal" class="val">6</span>dB @5.5k</label>
+        <input id="shelf" type="range" min="0" max="24" value="6">
       </div>
 
       <div class="ctl">
@@ -135,7 +152,7 @@
   </section>
 
   <footer class="ftr dim">
-    6117ch3r v1.1 // output chain: drive → comp(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale
+    6117ch3r v1.2 // output: drive → glue comp → tape sat → hi-shelf → lim(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale
   </footer>
 
 </main>
