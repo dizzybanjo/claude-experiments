@@ -31,6 +31,9 @@ grind), weighted by four palettes:
 | K1CK | kick-drum amount — pitch-drop sine kicks on the quarter-note grid (never jittered, never beat-repeated) to keep the pulse legible |
 | 3V0LV3 ∞ | reseeds and regenerates the pattern at every loop boundary — endless mutation |
 | V01C3 M4TR1X | per-voice LVL (level ×0–2), PIT (pitch ×0.25–4), DEC (decay/time ×0.25–4), WGT (probability weight ×0–3) for all 15 voices; LVL/PIT/DEC apply instantly, WGT regenerates; double-click any slider to reset |
+| F1LT3R CH40S | stereo pair of resonant lowpass filters on the master bus; seeded jumps locked to pattern-event positions yank each channel's cutoff (120 Hz–9 kHz, Q 3–16) then glide it back open — snap cuts and dive-sweeps, L/R/both |
+| R3V3RB S3ND | random per-event sends to a Quadraverb-style bright digital reverb (2.4 s noise-tail convolution with sparse early reflections) |
+| P1NG-P0NG S3ND | random per-event sends to a tempo-synced ping-pong delay (dotted-eighth hops, hard-panned, filtered cross-feedback) |
 | BUS C0MP | master glue compressor (4:1, 10 ms/150 ms) — amount deepens threshold −2→−24 dB with auto makeup |
 | T4P3 S4T | tape saturation — gentle compensated tanh plus head-rolloff lowpass (18 kHz→9 kHz) |
 | H1-SH3LF CUT | high-shelf at 5.5 kHz, 0 to −24 dB — tames the harsh top end |
@@ -41,12 +44,12 @@ Keyboard: `SPACE` play/stop · `G` generate · `E` export.
 
 ## Audio safety
 
-Master chain: gain → drive (compensated tanh) → glue compressor (4:1) →
-tape saturation (compensated tanh + rolloff) → high shelf → safety
-compressor (20:1, −6 dB threshold, 2 ms attack) → tanh soft-clip →
-brickwall clamp at ±0.97 (≈ −0.26 dBFS), 4× oversampled. The tone stages
-sit before the fixed safety stages, so no setting can push the output
-past full scale.
+Master chain: gain → drive (compensated tanh) → chaos LPF pair (L/R) →
+glue compressor (4:1) → tape saturation (compensated tanh + rolloff) →
+high shelf → safety compressor (20:1, −6 dB threshold, 2 ms attack) →
+tanh soft-clip → brickwall clamp at ±0.97 (≈ −0.26 dBFS), 4× oversampled.
+Reverb and delay returns re-enter at the glue compressor — inside the
+safety stages, so no setting can push the output past full scale.
 Nothing reaching your ears or the WAV file can exceed full scale.
 
 ## Export

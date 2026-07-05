@@ -99,6 +99,23 @@
         </label>
       </div>
 
+      <div class="subdiv dim">──[ FX ]─────────────────────</div>
+
+      <div class="ctl">
+        <label for="flt">F1LT3R CH40S <span id="fltVal" class="val">40</span></label>
+        <input id="flt" type="range" min="0" max="100" value="40">
+      </div>
+
+      <div class="ctl">
+        <label for="rvb">R3V3RB S3ND <span id="rvbVal" class="val">45</span></label>
+        <input id="rvb" type="range" min="0" max="100" value="45">
+      </div>
+
+      <div class="ctl">
+        <label for="dly">P1NG-P0NG S3ND <span id="dlyVal" class="val">45</span></label>
+        <input id="dly" type="range" min="0" max="100" value="45">
+      </div>
+
       <div class="subdiv dim">──[ M4ST3R 0UTPUT ]──────────</div>
 
       <div class="ctl">
@@ -152,7 +169,7 @@
   </section>
 
   <footer class="ftr dim">
-    6117ch3r v1.2 // output: drive → glue comp → tape sat → hi-shelf → lim(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale
+    6117ch3r v1.3 // output: drive → chaos lpf L/R → glue → tape → shelf → lim(20:1) → tanh → clip@-0.26dBFS // fx return pre-glue // no signal exceeds full scale
   </footer>
 
 </main>

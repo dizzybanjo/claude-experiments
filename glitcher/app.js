@@ -170,7 +170,7 @@ function generateEvent(rng, type, chaos, stepDur) {
   return ev;
 }
 
-function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick = 0, wgts = null) {
+function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick = 0, wgts = null, flt = 0) {
   const rng = mulberry32(seed);
   const steps = bars * 16;
   const stepDur = 60 / bpm / 4;
@@ -197,6 +197,9 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
       if (s % 16 === 0 && weights.sub > 0 && rng() < 0.4) type = 'sub';
       const ev = generateEvent(rng, type, chaos, stepDur);
       ev.step = s;
+      // random fx sends (kicks stay dry — they're added separately below)
+      if (rng() < 0.32) ev.rvb = rrange(rng, 0.25, 0.95);
+      if (rng() < 0.28) ev.dly = rrange(rng, 0.25, 0.9);
       events.push(ev);
     }
   }
@@ -269,7 +272,25 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
   }
   events.sort((a, b) => (a.step + (a.frac || 0)) - (b.step + (b.frac || 0)));
 
-  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, kick, events };
+  /* ── chaotic master filter jumps, locked to event positions ───── */
+  const fjumps = [];
+  if (flt > 0) {
+    for (const e of events) {
+      if (e.type === 'kick') continue;
+      if (rng() < flt * 0.45) {
+        fjumps.push({
+          step: e.step, frac: e.frac || 0,
+          f: rexp(rng, 120, 9000),
+          q: rrange(rng, 3, 16),
+          glide: rrange(rng, 0.05, 0.6),
+          mode: rng() < 0.6 ? 'snap' : 'sweep',
+          ch: rint(rng, 0, 2),           // 0=L 1=R 2=both
+        });
+      }
+    }
+  }
+
+  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, kick, flt, events, fjumps };
 }
 
 /* ── shared deterministic noise buffer (per context) ────────────── */
@@ -316,9 +337,11 @@ function getCrushCurve(levels) {
 }
 
 /* ── master chain ─────────────────────────────────────────────────
-   input → drive → glue comp → tape sat → hi-shelf → safety comp → clip
-   The last two stages are fixed and guarantee output never exceeds
-   full scale; everything before them is user-shaped tone. */
+   input → drive → chaos LPF (stereo pair) → glue comp → tape sat →
+   hi-shelf → safety comp → clip
+   FX returns re-enter at the glue comp, skipping drive and the
+   jumping filters so tails stay smooth. The last two stages are
+   fixed and guarantee output never exceeds full scale. */
 function driveGains(drive01) {
   const pre = 1 + drive01 * 11;
   return { pre, post: 1 / Math.pow(pre, 0.55) };
@@ -346,6 +369,18 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
   driveShaper.oversample = '2x';
   const postDrive = ctx.createGain();
   postDrive.gain.value = dg.post;
+
+  // CHAOS LPF: independent resonant lowpass per channel; cutoffs rest
+  // wide open and get yanked around by pattern-scheduled jumps
+  const split = ctx.createChannelSplitter(2);
+  const lpfL = ctx.createBiquadFilter();
+  const lpfR = ctx.createBiquadFilter();
+  for (const f of [lpfL, lpfR]) {
+    f.type = 'lowpass';
+    f.frequency.value = 16000;
+    f.Q.value = 0.8;
+  }
+  const merge = ctx.createChannelMerger(2);
 
   // GLUE: musical bus compressor (amount = threshold depth + makeup)
   const gs = glueSettings(ms.glue);
@@ -400,12 +435,105 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
   const out = ctx.createGain();
   out.gain.value = 0.95;
 
-  input.connect(preDrive).connect(driveShaper).connect(postDrive)
-       .connect(busComp).connect(makeup)
+  input.connect(preDrive).connect(driveShaper).connect(postDrive).connect(split);
+  split.connect(lpfL, 0);
+  split.connect(lpfR, 1);
+  lpfL.connect(merge, 0, 0);
+  lpfR.connect(merge, 0, 1);
+  merge.connect(busComp).connect(makeup)
        .connect(preTape).connect(tapeShaper).connect(postTape).connect(tapeLP)
        .connect(shelf)
        .connect(comp).connect(clip).connect(out);
-  return { input, out, preDrive, postDrive, busComp, makeup, preTape, postTape, tapeLP, shelf };
+  return { input, out, preDrive, postDrive, lpfL, lpfR, fxReturn: busComp,
+           busComp, makeup, preTape, postTape, tapeLP, shelf };
+}
+
+/* yank a chaos filter at time t; snap = instant cut + glide open,
+   sweep = dive to the target then recover */
+function scheduleFilterJump(master, j, t) {
+  const filters = j.ch === 0 ? [master.lpfL] : j.ch === 1 ? [master.lpfR] : [master.lpfL, master.lpfR];
+  for (const flt of filters) {
+    const f = flt.frequency, q = flt.Q;
+    f.cancelScheduledValues(t);
+    q.cancelScheduledValues(t);
+    if (j.mode === 'snap') {
+      f.setValueAtTime(j.f, t);
+    } else {
+      f.setValueAtTime(16000, t);
+      f.exponentialRampToValueAtTime(j.f, t + j.glide * 0.4);
+    }
+    f.exponentialRampToValueAtTime(16000, t + j.glide);
+    q.setValueAtTime(j.q, t);
+    q.linearRampToValueAtTime(0.8, t + j.glide);
+  }
+}
+
+/* ── fx buses: quadraverb-style reverb + tempo ping-pong delay ──── */
+const irCache = new WeakMap();
+function getVerbIR(ctx) {
+  let ir = irCache.get(ctx);
+  if (!ir) {
+    const sr = ctx.sampleRate, dur = 2.4, len = Math.floor(sr * dur);
+    ir = ctx.createBuffer(2, len, sr);
+    const rng = mulberry32(0x51A7E5);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      // sparse bright early reflections, first 90ms
+      for (let k = 0; k < 14; k++) {
+        const i = Math.floor(rng() * sr * 0.09);
+        if (i < len) d[i] += (rng() * 2 - 1) * 0.6;
+      }
+      // dense decaying tail — kept full-bandwidth for that bright
+      // late-80s digital sheen
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        const envIn = t < 0.012 ? t / 0.012 : 1;
+        d[i] += (rng() * 2 - 1) * Math.exp(-3.2 * t / dur) * envIn * 0.5;
+      }
+    }
+    irCache.set(ctx, ir);
+  }
+  return ir;
+}
+
+function buildFx(ctx, returnNode) {
+  // reverb
+  const verbIn = ctx.createGain();
+  const conv = ctx.createConvolver();
+  conv.buffer = getVerbIR(ctx);
+  const verbHP = ctx.createBiquadFilter();
+  verbHP.type = 'highpass'; verbHP.frequency.value = 220;
+  const verbOut = ctx.createGain();
+  verbOut.gain.value = 0.8;
+  verbIn.connect(conv).connect(verbHP).connect(verbOut).connect(returnNode);
+
+  // ping-pong delay: L → R → feedback → L, hard-panned taps
+  const dlyIn = ctx.createGain();
+  const dL = ctx.createDelay(5);
+  const dR = ctx.createDelay(5);
+  const fb = ctx.createGain();
+  fb.gain.value = 0.42;
+  const fbTone = ctx.createBiquadFilter();
+  fbTone.type = 'lowpass'; fbTone.frequency.value = 3800;
+  const panL = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
+  const panR = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
+  if (panL.pan) { panL.pan.value = -0.85; panR.pan.value = 0.85; }
+  const dlyOut = ctx.createGain();
+  dlyOut.gain.value = 0.85;
+  dlyIn.connect(dL);
+  dL.connect(panL).connect(dlyOut);
+  dL.connect(dR);
+  dR.connect(panR).connect(dlyOut);
+  dR.connect(fb).connect(fbTone).connect(dL);
+  dlyOut.connect(returnNode);
+
+  return { verbIn, dlyIn, dL, dR };
+}
+
+function setFxTimes(fx, stepDur) {
+  const t = Math.min(4.9, stepDur * 3); // dotted eighth per hop
+  fx.dL.delayTime.value = t;
+  fx.dR.delayTime.value = t;
 }
 
 /* ── voice scheduling (context-agnostic) ────────────────────────── */
@@ -422,8 +550,21 @@ function panNode(ctx, dest, pan) {
   return p;
 }
 
-function scheduleEvent(ctx, dest, ev, when) {
+function scheduleEvent(ctx, dest, ev, when, fx) {
   const out = panNode(ctx, dest, ev.pan);
+  // random per-event fx sends, scaled by the live send sliders
+  if (fx) {
+    if (ev.rvb && fx.rvbLvl > 0) {
+      const s = ctx.createGain();
+      s.gain.value = ev.rvb * fx.rvbLvl;
+      out.connect(s); s.connect(fx.verbIn);
+    }
+    if (ev.dly && fx.dlyLvl > 0) {
+      const s = ctx.createGain();
+      s.gain.value = ev.dly * fx.dlyLvl;
+      out.connect(s); s.connect(fx.dlyIn);
+    }
+  }
   const noiseBuf = getNoiseBuffer(ctx);
   const stopAt = [];
 
@@ -780,12 +921,14 @@ function ensureCtx() {
   if (state.ctx) state.ctx.close();
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: state.sampleRate });
   const master = buildMaster(ctx, masterSettings());
+  const fx = buildFx(ctx, master.fxReturn);
+  if (state.pattern) setFxTimes(fx, state.pattern.stepDur);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.55;
   master.out.connect(analyser);
   analyser.connect(ctx.destination);
-  state.ctx = ctx; state.master = master; state.analyser = analyser;
+  state.ctx = ctx; state.master = master; state.fx = fx; state.analyser = analyser;
   return ctx;
 }
 
@@ -798,6 +941,7 @@ function readParams() {
     chaos: parseInt($('chaos').value, 10) / 100,
     repeat: parseInt($('repeat').value, 10) / 100,
     kick: parseInt($('kick').value, 10) / 100,
+    flt: parseInt($('flt').value, 10) / 100,
     palette: $('palette').value,
     wgts: Object.fromEntries(VOICE_ORDER.map(t => [t, voiceParams[t].wgt])),
   };
@@ -814,7 +958,7 @@ function doGenerate(newSeed) {
   seedField.value = state.seed.toString(16).toUpperCase().padStart(8, '0');
 
   const p = readParams();
-  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat, p.kick, p.wgts);
+  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat, p.kick, p.wgts, p.flt);
 
   // step -> events map for the live scheduler
   const map = new Map();
@@ -823,6 +967,13 @@ function doGenerate(newSeed) {
     map.get(ev.step).push(ev);
   }
   state.stepMap = map;
+  const fmap = new Map();
+  for (const j of state.pattern.fjumps) {
+    if (!fmap.has(j.step)) fmap.set(j.step, []);
+    fmap.get(j.step).push(j);
+  }
+  state.fltMap = fmap;
+  if (state.fx) setFxTimes(state.fx, state.pattern.stepDur);
   state.nextStep = 0;
 
   logLine(`▓ GEN seed=${seedField.value} ${p.palette} ${p.bpm}bpm ${p.bars}bar ` +
@@ -838,6 +989,11 @@ const LOOKAHEAD = 0.12, TICK_MS = 25;
 function schedulerTick() {
   const ctx = state.ctx;
   if (!ctx || !state.pattern) return;
+  const fxSends = {
+    verbIn: state.fx.verbIn, dlyIn: state.fx.dlyIn,
+    rvbLvl: parseInt($('rvb').value, 10) / 100,
+    dlyLvl: parseInt($('dly').value, 10) / 100,
+  };
   while (state.nextTime < ctx.currentTime + LOOKAHEAD) {
     const pat = state.pattern; // re-read: evolve may swap it mid-loop
     const evs = state.stepMap.get(state.nextStep);
@@ -845,10 +1001,15 @@ function schedulerTick() {
       for (const ev of evs) {
         const mev = applyVoiceMods(ev);
         const when = state.nextTime + ((mev.frac || 0) + mev.jit) * pat.stepDur;
-        scheduleEvent(ctx, state.master.input, mev, Math.max(when, ctx.currentTime + 0.001));
+        scheduleEvent(ctx, state.master.input, mev, Math.max(when, ctx.currentTime + 0.001), fxSends);
         state.flashQueue.push({ time: when, type: mev.type, pan: mev.pan });
         logLine(fmtEvent(mev), 'ev');
       }
+    }
+    const js = state.fltMap.get(state.nextStep);
+    if (js) {
+      for (const j of js)
+        scheduleFilterJump(state.master, j, Math.max(state.nextTime + j.frac * pat.stepDur, ctx.currentTime + 0.001));
     }
     state.flashQueue.push({ time: state.nextTime, type: '_step', step: state.nextStep });
     state.nextTime += pat.stepDur;
@@ -900,7 +1061,7 @@ async function exportWav() {
   if (!state.pattern) doGenerate(false);
   const pat = state.pattern;
   const sr = state.sampleRate;
-  const tail = 1.5;
+  const tail = 3.5; // room for reverb + delay tails
   const dur = pat.steps * pat.stepDur + tail;
   const btn = $('export');
   btn.disabled = true;
@@ -911,11 +1072,20 @@ async function exportWav() {
     const octx = new OfflineAudioContext(2, Math.ceil(dur * sr), sr);
     const master = buildMaster(octx, masterSettings());
     master.out.connect(octx.destination);
+    const fx = buildFx(octx, master.fxReturn);
+    setFxTimes(fx, pat.stepDur);
+    const fxSends = {
+      verbIn: fx.verbIn, dlyIn: fx.dlyIn,
+      rvbLvl: parseInt($('rvb').value, 10) / 100,
+      dlyLvl: parseInt($('dly').value, 10) / 100,
+    };
     for (const ev of pat.events) {
       const mev = applyVoiceMods(ev);
       const when = 0.05 + (mev.step + (mev.frac || 0) + mev.jit) * pat.stepDur;
-      scheduleEvent(octx, master.input, mev, Math.max(when, 0));
+      scheduleEvent(octx, master.input, mev, Math.max(when, 0), fxSends);
     }
+    for (const j of pat.fjumps)
+      scheduleFilterJump(master, j, Math.max(0.05 + (j.step + j.frac) * pat.stepDur, 0));
     const rendered = await octx.startRendering();
     const blob = encodeWav(rendered);
     const name = `6117ch3r_${state.seed.toString(16).toUpperCase()}_${pat.bpm}bpm_${sr / 1000}k.wav`;
@@ -1184,10 +1354,15 @@ function bindUi() {
   $('chaos').addEventListener('input', () => { $('chaosVal').textContent = $('chaos').value; });
   $('repeat').addEventListener('input', () => { $('repeatVal').textContent = $('repeat').value; });
   $('kick').addEventListener('input', () => { $('kickVal').textContent = $('kick').value; });
+  $('flt').addEventListener('input', () => { $('fltVal').textContent = $('flt').value; });
+  // send sliders are read at schedule time — display only, no regen
+  $('rvb').addEventListener('input', () => { $('rvbVal').textContent = $('rvb').value; });
+  $('dly').addEventListener('input', () => { $('dlyVal').textContent = $('dly').value; });
   $('density').addEventListener('change', () => regenSameSeed());
   $('chaos').addEventListener('change', () => regenSameSeed());
   $('repeat').addEventListener('change', () => regenSameSeed());
   $('kick').addEventListener('change', () => regenSameSeed());
+  $('flt').addEventListener('change', () => regenSameSeed());
   $('vreset').addEventListener('click', resetVoices);
 
   // master-bus controls are live: no regen, just retune the chain
