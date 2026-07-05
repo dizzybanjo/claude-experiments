@@ -35,6 +35,26 @@ const PALETTES = {
   D4T4:  { databend: 22, modem: 18, tape: 14, crush: 12, crackle: 10, stutter: 10, grind: 8, click: 6, noise: 4, blip: 2, hiss: 2 },
 };
 
+/* ── tonal system ───────────────────────────────────────────────── */
+const MODES = {
+  ionian:     [0, 2, 4, 5, 7, 9, 11],
+  dorian:     [0, 2, 3, 5, 7, 9, 10],
+  phrygian:   [0, 1, 3, 5, 7, 8, 10],
+  lydian:     [0, 2, 4, 6, 7, 9, 11],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  aeolian:    [0, 2, 3, 5, 7, 8, 10],
+  locrian:    [0, 1, 3, 5, 6, 8, 10],
+  harmminor:  [0, 2, 3, 5, 7, 8, 11],
+};
+
+/* frequency of scale degree n (n may exceed the octave or go negative) */
+function degFreq(rootMidi, scale, degree) {
+  const oct = Math.floor(degree / scale.length);
+  const idx = ((degree % scale.length) + scale.length) % scale.length;
+  const midi = rootMidi + oct * 12 + scale[idx];
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
 /* ── pattern generation ─────────────────────────────────────────
    All parameters are resolved to concrete numbers here, so the
    live scheduler and the offline WAV render produce identical audio. */
@@ -170,7 +190,7 @@ function generateEvent(rng, type, chaos, stepDur) {
   return ev;
 }
 
-function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick = 0, wgts = null, flt = 0) {
+function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick = 0, wgts = null, flt = 0, tonal = null) {
   const rng = mulberry32(seed);
   const steps = bars * 16;
   const stepDur = 60 / bpm / 4;
@@ -225,6 +245,59 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
     }
   }
 
+  /* ── bassline: scale-degree walk in the chosen key/mode ───────── */
+  const scale = tonal ? (MODES[tonal.mode] || MODES.aeolian) : null;
+  const bassAmt = tonal ? tonal.bass * (wgts && wgts.bass !== undefined ? wgts.bass : 1) : 0;
+  if (bassAmt > 0) {
+    const rootMidi = 36 + tonal.key; // C2..B2 register
+    const degPool = [0, 0, 0, 4, 4, 2, 7, 5, 1, 3]; // root-heavy
+    let lastDeg = 0;
+    for (let s = 0; s < steps; s++) {
+      const onGrid = s % 2 === 0;
+      const prob = onGrid ? bassAmt * (s % 8 === 0 ? 1.15 : 0.7)
+                          : bassAmt * chaos * 0.25; // syncopated pushes
+      if (rng() < prob) {
+        const deg = rng() < 0.35 ? lastDeg : rpick(rng, degPool);
+        lastDeg = deg;
+        const f = degFreq(rootMidi, scale, deg);
+        const ev = {
+          type: 'bass', step: s, pan: rrange(rng, -0.15, 0.15), jit: 0,
+          f, dur: stepDur * rrange(rng, 0.9, 2.4), g: rrange(rng, 0.5, 0.75),
+          cutoff: f * rrange(rng, 3, 9), res: rrange(rng, 2, 11),
+          wave: rng() < 0.7 ? 'sawtooth' : 'square',
+        };
+        if (rng() < 0.22 + chaos * 0.2) ev.f2 = degFreq(rootMidi, scale, rpick(rng, degPool)); // slide
+        if (rng() < 0.2) ev.dly = rrange(rng, 0.15, 0.4);
+        events.push(ev);
+      }
+    }
+  }
+
+  /* ── pads: tertian chord stacks from the mode, one per bar max ── */
+  const padAmt = tonal ? tonal.pad * (wgts && wgts.pad !== undefined ? wgts.pad : 1) : 0;
+  if (padAmt > 0) {
+    const rootMidi = 48 + tonal.key; // C3..B3 register
+    for (let b = 0; b < bars; b++) {
+      if (rng() < padAmt * 0.85) {
+        const baseDeg = rpick(rng, [0, 0, 3, 4, 5, 2]);
+        const degs = [baseDeg, baseDeg + 2, baseDeg + 4];
+        if (rng() < 0.5) degs.push(baseDeg + 6);  // 7th
+        if (rng() < 0.3) degs.push(baseDeg + 8);  // 9th
+        events.push({
+          type: 'pad', step: b * 16, frac: 0, jit: 0, pan: 0,
+          fs: degs.map(d => degFreq(rootMidi, scale, d)),
+          dur: stepDur * 16 * rrange(rng, 0.95, 1.9),
+          att: rrange(rng, 0.2, 1.1),
+          g: rrange(rng, 0.14, 0.26),
+          cutoff: rexp(rng, 700, 3200),
+          det: rrange(rng, 0.002, 0.008),
+          wave: rng() < 0.7 ? 'sawtooth' : 'triangle',
+          rvb: rrange(rng, 0.45, 0.9),
+        });
+      }
+    }
+  }
+
   /* ── beat repeat: capture a slice, restamp it forward ──────────
      Three flavours per pass (chosen by rng): plain echo, pitched
      echo (rising or diving), and roll (slice length halves each
@@ -234,8 +307,9 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
   for (let p = 0; p < passes; p++) {
     const len = rpick(rng, [1, 1, 2, 2, 4]);
     const start = rint(rng, 0, Math.max(0, steps - len * 2));
-    // kicks are excluded so the pulse never smears
-    const src = events.filter(e => !e.rep && e.type !== 'kick' && e.step >= start && e.step < start + len);
+    // kick/bass/pad excluded: pulse stays put, tonal layer stays in key
+    const src = events.filter(e => !e.rep && e.type !== 'kick' && e.type !== 'bass' && e.type !== 'pad' &&
+                                   e.step >= start && e.step < start + len);
     if (!src.length) continue;
     const reps = rint(rng, 2, 3 + Math.round(chaos * 5));
     const flavour = rng();
@@ -276,7 +350,7 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
   const fjumps = [];
   if (flt > 0) {
     for (const e of events) {
-      if (e.type === 'kick') continue;
+      if (e.type === 'kick' || e.type === 'pad') continue;
       if (rng() < flt * 0.45) {
         fjumps.push({
           step: e.step, frac: e.frac || 0,
@@ -768,6 +842,57 @@ function scheduleEvent(ctx, dest, ev, when, fx) {
       o1.stop(when + ev.dur + 0.02); o2.stop(when + ev.dur + 0.02);
       break;
     }
+    case 'bass': {
+      const o = ctx.createOscillator();
+      o.type = ev.wave;
+      o.frequency.setValueAtTime(ev.f, when);
+      if (ev.f2) o.frequency.exponentialRampToValueAtTime(ev.f2, when + ev.dur * 0.9);
+      const sub = ctx.createOscillator();
+      sub.type = 'sine';
+      sub.frequency.setValueAtTime(ev.f * 0.5, when);
+      if (ev.f2) sub.frequency.exponentialRampToValueAtTime(ev.f2 * 0.5, when + ev.dur * 0.9);
+      const subG = ctx.createGain();
+      subG.gain.value = 0.35;
+      // acid filter: opens on the pluck, sweeps shut over the note
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.Q.value = ev.res;
+      lp.frequency.setValueAtTime(Math.min(16000, ev.cutoff * 2.5), when);
+      lp.frequency.exponentialRampToValueAtTime(Math.max(60, ev.cutoff * 0.5), when + ev.dur * 0.7);
+      const g = ctx.createGain();
+      env(g.gain, when, ev.g, ev.dur, 0.004);
+      o.connect(lp);
+      sub.connect(subG).connect(lp);
+      lp.connect(g).connect(out);
+      o.start(when); sub.start(when);
+      o.stop(when + ev.dur + 0.05); sub.stop(when + ev.dur + 0.05);
+      break;
+    }
+    case 'pad': {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = ev.cutoff; lp.Q.value = 0.8;
+      const g = ctx.createGain();
+      const att = Math.min(ev.att, ev.dur * 0.4);
+      const rel = Math.min(1.2, ev.dur * 0.3);
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.linearRampToValueAtTime(ev.g, when + att);
+      g.gain.setValueAtTime(ev.g, when + ev.dur - rel);
+      g.gain.linearRampToValueAtTime(0.0001, when + ev.dur);
+      lp.connect(g).connect(out);
+      const noteG = 0.9 / (ev.fs.length * 2);
+      ev.fs.forEach((f, i) => {
+        const pn = panNode(ctx, lp, (i % 2 ? 1 : -1) * (0.25 + 0.12 * i));
+        for (const sgn of [1, -1]) {
+          const o = ctx.createOscillator();
+          o.type = ev.wave;
+          o.frequency.value = f * (1 + sgn * ev.det);
+          const ng = ctx.createGain();
+          ng.gain.value = noteG;
+          o.connect(ng).connect(pn);
+          o.start(when); o.stop(when + ev.dur + 0.1);
+        }
+      });
+      break;
+    }
     case 'kick': {
       const o = ctx.createOscillator();
       o.type = 'sine';
@@ -844,25 +969,27 @@ const state = {
 };
 
 const VOICE_TAGS = {
-  kick: 'KCK', click: 'CLK', blip: 'BLP', noise: 'NSE', hiss: 'HSS', sub: 'SUB',
-  zap: 'ZAP', fm: 'FM_', stutter: 'STT', crackle: 'CRK', crush: 'CRH',
-  tape: 'TPS', databend: 'DBN', modem: 'MDM', grind: 'GRD',
+  kick: 'KCK', bass: 'BSS', pad: 'P4D', click: 'CLK', blip: 'BLP', noise: 'NSE',
+  hiss: 'HSS', sub: 'SUB', zap: 'ZAP', fm: 'FM_', stutter: 'STT', crackle: 'CRK',
+  crush: 'CRH', tape: 'TPS', databend: 'DBN', modem: 'MDM', grind: 'GRD',
 };
 const VOICE_NAMES = {
-  kick: 'kick drum', click: 'impulse click', blip: 'sine blip', noise: 'noise burst',
-  hiss: 'hiss wash', sub: 'sub drop', zap: 'filter zap', fm: 'fm metal',
-  stutter: 'stutter ratchet', crackle: 'crackle', crush: 'bitcrush tone',
-  tape: 'tape stop', databend: 'databend', modem: 'modem fsk', grind: 'grind saw',
+  kick: 'kick drum', bass: 'bassline', pad: 'pad chords', click: 'impulse click',
+  blip: 'sine blip', noise: 'noise burst', hiss: 'hiss wash', sub: 'sub drop',
+  zap: 'filter zap', fm: 'fm metal', stutter: 'stutter ratchet', crackle: 'crackle',
+  crush: 'bitcrush tone', tape: 'tape stop', databend: 'databend',
+  modem: 'modem fsk', grind: 'grind saw',
 };
-const VOICE_ORDER = ['kick', 'sub', 'click', 'blip', 'noise', 'hiss', 'zap', 'fm',
-                     'stutter', 'crackle', 'crush', 'tape', 'databend', 'modem', 'grind'];
+const VOICE_ORDER = ['kick', 'bass', 'pad', 'sub', 'click', 'blip', 'noise', 'hiss',
+                     'zap', 'fm', 'stutter', 'crackle', 'crush', 'tape', 'databend',
+                     'modem', 'grind'];
 
 /* per-voice modifiers: lvl gain ×, pit pitch ×, dec time ×, wgt weight × */
 const voiceParams = {};
 for (const t of VOICE_ORDER) voiceParams[t] = { lvl: 1, pit: 1, dec: 1, wgt: 1 };
 
-const PITCH_KEYS = ['f', 'f0', 'f1', 'c', 'hp', 'bp', 'lp'];
-const TIME_KEYS = ['dur', 'iv', 'sdur'];
+const PITCH_KEYS = ['f', 'f0', 'f1', 'f2', 'c', 'hp', 'bp', 'lp', 'cutoff'];
+const TIME_KEYS = ['dur', 'iv', 'sdur', 'att'];
 const clampF = (v) => Math.min(18000, Math.max(10, v));
 
 /* applied at schedule time (live + export), so LVL/PIT/DEC react instantly
@@ -875,6 +1002,7 @@ function applyVoiceMods(ev) {
     for (const k of PITCH_KEYS) if (c[k] !== undefined) c[k] = clampF(c[k] * m.pit);
     if (c.freqs) c.freqs = c.freqs.map(x => clampF(x * m.pit));
     if (c.bfs) c.bfs = c.bfs.map(x => clampF(x * m.pit));
+    if (c.fs) c.fs = c.fs.map(x => clampF(x * m.pit));
   }
   if (m.dec !== 1) {
     for (const k of TIME_KEYS) if (c[k] !== undefined) c[k] *= m.dec;
@@ -944,6 +1072,12 @@ function readParams() {
     flt: parseInt($('flt').value, 10) / 100,
     palette: $('palette').value,
     wgts: Object.fromEntries(VOICE_ORDER.map(t => [t, voiceParams[t].wgt])),
+    tonal: {
+      key: parseInt($('key').value, 10),
+      mode: $('mode').value,
+      bass: parseInt($('bass').value, 10) / 100,
+      pad: parseInt($('pad').value, 10) / 100,
+    },
   };
 }
 
@@ -958,7 +1092,7 @@ function doGenerate(newSeed) {
   seedField.value = state.seed.toString(16).toUpperCase().padStart(8, '0');
 
   const p = readParams();
-  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat, p.kick, p.wgts, p.flt);
+  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat, p.kick, p.wgts, p.flt, p.tonal);
 
   // step -> events map for the live scheduler
   const map = new Map();
@@ -1025,7 +1159,7 @@ function schedulerTick() {
 function fmtEvent(ev) {
   const tag = VOICE_TAGS[ev.type] || '???';
   const panStr = ev.pan < -0.05 ? `L${Math.round(-ev.pan * 99)}` : ev.pan > 0.05 ? `R${Math.round(ev.pan * 99)}` : 'C00';
-  const f = ev.f || ev.f0 || ev.c || ev.hp || (ev.freqs && ev.freqs[0]) || 0;
+  const f = ev.f || ev.f0 || ev.c || ev.hp || (ev.freqs && ev.freqs[0]) || (ev.fs && ev.fs[0]) || 0;
   return `[${String(ev.step).padStart(3, '0')}] ${ev.rep ? '↻' : ' '}${tag} ${f ? Math.round(f) + 'Hz' : '----'} ${panStr}`;
 }
 
@@ -1355,6 +1489,8 @@ function bindUi() {
   $('repeat').addEventListener('input', () => { $('repeatVal').textContent = $('repeat').value; });
   $('kick').addEventListener('input', () => { $('kickVal').textContent = $('kick').value; });
   $('flt').addEventListener('input', () => { $('fltVal').textContent = $('flt').value; });
+  $('bass').addEventListener('input', () => { $('bassVal').textContent = $('bass').value; });
+  $('pad').addEventListener('input', () => { $('padVal').textContent = $('pad').value; });
   // send sliders are read at schedule time — display only, no regen
   $('rvb').addEventListener('input', () => { $('rvbVal').textContent = $('rvb').value; });
   $('dly').addEventListener('input', () => { $('dlyVal').textContent = $('dly').value; });
@@ -1363,6 +1499,10 @@ function bindUi() {
   $('repeat').addEventListener('change', () => regenSameSeed());
   $('kick').addEventListener('change', () => regenSameSeed());
   $('flt').addEventListener('change', () => regenSameSeed());
+  $('key').addEventListener('change', () => regenSameSeed());
+  $('mode').addEventListener('change', () => regenSameSeed());
+  $('bass').addEventListener('change', () => regenSameSeed());
+  $('pad').addEventListener('change', () => regenSameSeed());
   $('vreset').addEventListener('click', resetVoices);
 
   // master-bus controls are live: no regen, just retune the chain

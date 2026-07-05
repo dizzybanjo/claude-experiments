@@ -5,11 +5,11 @@ Pure Web Audio, zero dependencies. Open `index.html` in any modern browser.
 
 ## What it does
 
-Generates seeded, deterministic glitch percussion sequences from fifteen
-synthesized voice types (kick drum, clicks, sine blips, filtered noise, hiss,
-sub drops, zaps, FM metal, stutter ratchets, vinyl crackle, bitcrush tones,
-tape-stop plunges, databend buffer corruption, modem FSK chatter, overdriven
-grind), weighted by four palettes:
+Generates seeded, deterministic glitch sequences from seventeen synthesized
+voice types (kick drum, bassline, pad chords, clicks, sine blips, filtered
+noise, hiss, sub drops, zaps, FM metal, stutter ratchets, vinyl crackle,
+bitcrush tones, tape-stop plunges, databend buffer corruption, modem FSK
+chatter, overdriven grind). Percussion voices are weighted by four palettes:
 
 - **V01D** — minimal high-sine blips, clicks, crackle, subs
 - **4C1D** — subs, zaps, acid stutters, FM hits, grind
@@ -26,6 +26,9 @@ grind), weighted by four palettes:
 | BARS | 1 / 2 / 4 / 8 (16 steps per bar) |
 | DENSITY | event probability per step |
 | CHAOS | timing jitter, ratchets, param extremes, doubled hits |
+| K3Y / M0D3 | tonal center for bass + pads: 12 keys × 8 modes (the 7 church modes + harmonic minor) |
+| B4SSL1N3 | acid-style bassline generator — scale-degree walk (root-heavy) with resonant filter plucks, sub-octave layer, and occasional slides; always in key, never beat-repeated |
+| P4D | pad generator — tertian chord stacks (triad + optional 7th/9th) from the mode, detuned dual oscillators per note, slow attack, heavy reverb send |
 | B34T R3P34T | beat-repeat amount: slices of the pattern get echoed forward as plain repeats, pitched (rising/diving) repeats, or halving-length rolls |
 | DR1V3 | master-bus distortion (level-compensated tanh stage, pre-limiter; live control, also baked into exports) |
 | K1CK | kick-drum amount — pitch-drop sine kicks on the quarter-note grid (never jittered, never beat-repeated) to keep the pulse legible |
