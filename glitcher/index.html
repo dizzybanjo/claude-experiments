@@ -65,9 +65,10 @@
       <div class="ctl">
         <label for="palette">PALETTE</label>
         <select id="palette">
-          <option value="IKEDA">IKEDA — sine/click minimal</option>
-          <option value="AFX" selected>AFX — subs/zaps/acid</option>
-          <option value="AE">AE — fm/metal/granular</option>
+          <option value="V01D">V01D — sine/click minimal</option>
+          <option value="4C1D" selected>4C1D — subs/zaps/acid</option>
+          <option value="M3T4L">M3T4L — fm/metal/granular</option>
+          <option value="D4T4">D4T4 — databend/modem/mosh</option>
         </select>
       </div>
 
@@ -79,6 +80,16 @@
       <div class="ctl">
         <label for="chaos">CHAOS <span id="chaosVal" class="val">45</span></label>
         <input id="chaos" type="range" min="0" max="100" value="45">
+      </div>
+
+      <div class="ctl">
+        <label for="repeat">B34T R3P34T <span id="repeatVal" class="val">40</span></label>
+        <input id="repeat" type="range" min="0" max="100" value="40">
+      </div>
+
+      <div class="ctl">
+        <label for="drive">DR1V3 <span id="driveVal" class="val">20</span></label>
+        <input id="drive" type="range" min="0" max="100" value="20">
       </div>
 
       <div class="ctl">
@@ -105,7 +116,7 @@
   </div>
 
   <footer class="ftr dim">
-    6117ch3r v1.0 // output chain: comp(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale
+    6117ch3r v1.1 // output chain: drive → comp(20:1) → tanh → clip@-0.26dBFS // no signal exceeds full scale
   </footer>
 
 </main>

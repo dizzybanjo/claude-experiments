@@ -29,9 +29,10 @@ function pickWeighted(rng, weights) {
 
 /* ── voice palettes (probability weights per voice type) ────────── */
 const PALETTES = {
-  IKEDA: { blip: 30, click: 22, crackle: 14, noise: 12, sub: 10, hiss: 8, stutter: 4, fm: 0, zap: 0, crush: 2 },
-  AFX:   { sub: 20, zap: 16, blip: 14, stutter: 14, fm: 10, click: 10, noise: 8, crush: 6, crackle: 2, hiss: 0 },
-  AE:    { fm: 22, crush: 16, stutter: 16, noise: 14, click: 10, crackle: 8, zap: 6, blip: 4, sub: 4, hiss: 0 },
+  V01D:  { blip: 30, click: 22, crackle: 12, noise: 10, sub: 10, hiss: 8, modem: 4, stutter: 2, crush: 2 },
+  '4C1D': { sub: 18, zap: 15, blip: 12, stutter: 12, fm: 8, click: 8, grind: 7, noise: 6, crush: 6, tape: 5, modem: 2, crackle: 1 },
+  M3T4L: { fm: 20, crush: 14, stutter: 14, grind: 11, noise: 10, click: 8, crackle: 6, zap: 6, tape: 5, databend: 4, sub: 4, blip: 3 },
+  D4T4:  { databend: 22, modem: 18, tape: 14, crush: 12, crackle: 10, stutter: 10, grind: 8, click: 6, noise: 4, blip: 2, hiss: 2 },
 };
 
 /* ── pattern generation ─────────────────────────────────────────
@@ -113,16 +114,59 @@ function generateEvent(rng, type, chaos, stepDur) {
       ev.g = rrange(rng, 0.25, 0.5);
       ev.bp = rexp(rng, 400, 6000);
       break;
+    case 'tape':   // tape-stop pitch plunge
+      ev.f = rexp(rng, 250, 2200);
+      ev.wave = rng() < 0.6 ? 'sawtooth' : 'square';
+      ev.dur = rrange(rng, 0.15, 0.5 + chaos * 0.3);
+      ev.g = rrange(rng, 0.2, 0.45);
+      ev.drop = rrange(rng, 0.015, 0.06); // final freq ratio
+      break;
+    case 'databend': { // corrupted buffer: noise with hard playbackRate jumps
+      ev.dur = rrange(rng, 0.1, 0.35 + chaos * 0.35);
+      const segs = rint(rng, 4, 6 + Math.round(chaos * 8));
+      ev.segT = []; ev.rates = []; ev.bfs = [];
+      for (let i = 0; i < segs; i++) {
+        // jitter inside each slot keeps times strictly increasing
+        ev.segT.push(((i + rng() * 0.9) / segs) * ev.dur);
+        ev.rates.push(rexp(rng, 0.08, 4));
+        ev.bfs.push(rexp(rng, 300, 9000));
+      }
+      ev.segT[0] = 0;
+      ev.q = rrange(rng, 1, 8);
+      ev.g = rrange(rng, 0.3, 0.6);
+      break;
+    }
+    case 'modem': { // FSK carrier chatter, dial-up style
+      ev.n = rint(rng, 6, 10 + Math.round(chaos * 14));
+      ev.iv = rrange(rng, 0.012, 0.04);
+      ev.dur = ev.n * ev.iv;
+      ev.freqs = []; ev.gates = [];
+      const base = rpick(rng, [600, 800, 1200, 1600, 2100]);
+      for (let i = 0; i < ev.n; i++) {
+        ev.freqs.push(base * rpick(rng, [0.5, 1, 1, 1.5, 2, 3]));
+        ev.gates.push(rng() < 0.82);
+      }
+      ev.g = rrange(rng, 0.2, 0.4);
+      break;
+    }
+    case 'grind':  // overdriven low growl
+      ev.f = rexp(rng, 40, 220);
+      ev.dur = rrange(rng, 0.08, 0.3 + chaos * 0.2);
+      ev.k = rint(rng, 4, 24);           // waveshaper drive
+      ev.lp = rexp(rng, 300, 2400);
+      ev.g = rrange(rng, 0.3, 0.55);
+      ev.det = rrange(rng, 3, 25);       // detune cents-ish (Hz offset)
+      break;
   }
   return ev;
 }
 
-function generatePattern(seed, bpm, bars, density, chaos, palette) {
+function generatePattern(seed, bpm, bars, density, chaos, palette, repeat) {
   const rng = mulberry32(seed);
   const steps = bars * 16;
   const stepDur = 60 / bpm / 4;
   const weights = PALETTES[palette];
-  const events = []; // { step, ...voice params }
+  const events = []; // { step, frac, ...voice params }
   const baseProb = 0.12 + density * 0.72;
 
   for (let s = 0; s < steps; s++) {
@@ -144,7 +188,54 @@ function generatePattern(seed, bpm, bars, density, chaos, palette) {
     ev.step = 0;
     events.push(ev);
   }
-  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, events };
+
+  /* ── beat repeat: capture a slice, restamp it forward ──────────
+     Three flavours per pass (chosen by rng): plain echo, pitched
+     echo (rising or diving), and roll (slice length halves each
+     repeat — classic stutter-edit build). Clones can land between
+     steps via ev.frac. */
+  const passes = Math.round(repeat * (bars + 1) * (0.6 + rng() * 1.1));
+  for (let p = 0; p < passes; p++) {
+    const len = rpick(rng, [1, 1, 2, 2, 4]);
+    const start = rint(rng, 0, Math.max(0, steps - len * 2));
+    const src = events.filter(e => !e.rep && e.step >= start && e.step < start + len);
+    if (!src.length) continue;
+    const reps = rint(rng, 2, 3 + Math.round(chaos * 5));
+    const flavour = rng();
+    const pitchRatio = flavour < 0.3 ? rrange(rng, 1.05, 1.35)
+                     : flavour < 0.6 ? rrange(rng, 0.65, 0.95) : 1;
+    const gainDecay = rrange(rng, 0.68, 1.0);
+    const roll = rng() < 0.45;
+    let pos = start + len;
+    let curLen = len;
+    for (let r = 1; r <= reps && pos < steps; r++) {
+      if (roll && curLen > 0.5) curLen /= 2;
+      const scale = curLen / len;
+      for (const e of src) {
+        const abs = pos + (e.step + (e.frac || 0) - start) * scale;
+        if (abs >= steps) continue;
+        const c = Object.assign({}, e);
+        for (const key of ['offs', 'amps', 'segT', 'rates', 'bfs', 'freqs', 'gates'])
+          if (c[key]) c[key] = c[key].slice();
+        c.rep = true;
+        c.step = Math.floor(abs);
+        c.frac = abs - c.step;
+        const pr = Math.pow(pitchRatio, r);
+        for (const key of ['f', 'f0', 'f1', 'c', 'hp', 'bp'])
+          if (c[key]) c[key] = Math.min(16000, c[key] * pr);
+        if (c.freqs) c.freqs = c.freqs.map(x => Math.min(16000, x * pr));
+        if (c.bfs) c.bfs = c.bfs.map(x => Math.min(16000, x * pr));
+        const gd = Math.pow(gainDecay, r);
+        if (c.g) c.g *= gd;
+        if (c.amps) c.amps = c.amps.map(a => a * gd);
+        events.push(c);
+      }
+      pos += curLen;
+    }
+  }
+  events.sort((a, b) => (a.step + (a.frac || 0)) - (b.step + (b.frac || 0)));
+
+  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, events };
 }
 
 /* ── shared deterministic noise buffer (per context) ────────────── */
@@ -162,6 +253,20 @@ function getNoiseBuffer(ctx) {
   return buf;
 }
 
+const driveCurveCache = new Map();
+function getDriveCurve(k) {
+  let c = driveCurveCache.get(k);
+  if (!c) {
+    c = new Float32Array(2048);
+    for (let i = 0; i < 2048; i++) {
+      const x = (i / 2047) * 2 - 1;
+      c[i] = Math.tanh(x * k) / Math.tanh(k);
+    }
+    driveCurveCache.set(k, c);
+  }
+  return c;
+}
+
 const crushCurveCache = new Map();
 function getCrushCurve(levels) {
   let c = crushCurveCache.get(levels);
@@ -176,10 +281,25 @@ function getCrushCurve(levels) {
   return c;
 }
 
-/* ── master chain: gain -> compressor -> brickwall clip ─────────── */
-function buildMaster(ctx) {
+/* ── master chain: gain -> drive -> compressor -> brickwall clip ── */
+function driveGains(drive01) {
+  const pre = 1 + drive01 * 11;
+  return { pre, post: 1 / Math.pow(pre, 0.55) };
+}
+
+function buildMaster(ctx, drive01 = 0) {
   const input = ctx.createGain();
   input.gain.value = 0.8;
+
+  // DRIVE: variable pre-gain into a fixed tanh stage, level-compensated.
+  const dg = driveGains(drive01);
+  const preDrive = ctx.createGain();
+  preDrive.gain.value = dg.pre;
+  const driveShaper = ctx.createWaveShaper();
+  driveShaper.curve = getDriveCurve(2.5);
+  driveShaper.oversample = '2x';
+  const postDrive = ctx.createGain();
+  postDrive.gain.value = dg.post;
 
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -6;
@@ -202,8 +322,9 @@ function buildMaster(ctx) {
   const out = ctx.createGain();
   out.gain.value = 0.95;
 
-  input.connect(comp).connect(clip).connect(out);
-  return { input, out };
+  input.connect(preDrive).connect(driveShaper).connect(postDrive)
+       .connect(comp).connect(clip).connect(out);
+  return { input, out, preDrive, postDrive };
 }
 
 /* ── voice scheduling (context-agnostic) ────────────────────────── */
@@ -356,6 +477,75 @@ function scheduleEvent(ctx, dest, ev, when) {
       o.start(when); o.stop(when + ev.dur + 0.02);
       break;
     }
+    case 'tape': {
+      const o = ctx.createOscillator();
+      o.type = ev.wave;
+      o.frequency.setValueAtTime(ev.f, when);
+      o.frequency.exponentialRampToValueAtTime(Math.max(1, ev.f * ev.drop), when + ev.dur);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.Q.value = 1;
+      lp.frequency.setValueAtTime(ev.f * 4, when);
+      lp.frequency.exponentialRampToValueAtTime(Math.max(40, ev.f * ev.drop * 4), when + ev.dur);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(ev.g, when + 0.004);
+      g.gain.setValueAtTime(ev.g, when + ev.dur * 0.6);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + ev.dur);
+      o.connect(lp).connect(g).connect(out);
+      o.start(when); o.stop(when + ev.dur + 0.02);
+      break;
+    }
+    case 'databend': {
+      const src = mkNoise();
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.Q.value = ev.q;
+      for (let i = 0; i < ev.segT.length; i++) {
+        src.playbackRate.setValueAtTime(ev.rates[i], when + ev.segT[i]);
+        bp.frequency.setValueAtTime(ev.bfs[i], when + ev.segT[i]);
+      }
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(ev.g, when + 0.003);
+      g.gain.setValueAtTime(ev.g, when + ev.dur * 0.8);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + ev.dur);
+      src.connect(bp).connect(g).connect(out);
+      src.start(when); src.stop(when + ev.dur + 0.03);
+      break;
+    }
+    case 'modem': {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      for (let i = 0; i < ev.n; i++) {
+        const t = when + i * ev.iv;
+        o.frequency.setValueAtTime(ev.freqs[i], t);
+        g.gain.setValueAtTime(ev.gates[i] ? ev.g : 0.0001, t);
+      }
+      g.gain.setValueAtTime(0.0001, when + ev.dur);
+      o.connect(g).connect(out);
+      o.start(when); o.stop(when + ev.dur + 0.02);
+      break;
+    }
+    case 'grind': {
+      const o1 = ctx.createOscillator();
+      const o2 = ctx.createOscillator();
+      o1.type = 'sawtooth'; o2.type = 'sawtooth';
+      o1.frequency.value = ev.f;
+      o2.frequency.value = ev.f + ev.det;
+      const ws = ctx.createWaveShaper();
+      ws.curve = getDriveCurve(ev.k);
+      ws.oversample = '2x';
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = ev.lp; lp.Q.value = 2;
+      const g = ctx.createGain();
+      env(g.gain, when, ev.g, ev.dur, 0.003);
+      o1.connect(ws); o2.connect(ws);
+      ws.connect(lp).connect(g).connect(out);
+      o1.start(when); o2.start(when);
+      o1.stop(when + ev.dur + 0.02); o2.stop(when + ev.dur + 0.02);
+      break;
+    }
   }
   return stopAt;
 }
@@ -415,13 +605,18 @@ const state = {
 const VOICE_TAGS = {
   click: 'CLK', blip: 'BLP', noise: 'NSE', hiss: 'HSS', sub: 'SUB',
   zap: 'ZAP', fm: 'FM_', stutter: 'STT', crackle: 'CRK', crush: 'CRH',
+  tape: 'TPS', databend: 'DBN', modem: 'MDM', grind: 'GRD',
 };
+
+function currentDrive() {
+  return parseInt($('drive').value, 10) / 100;
+}
 
 function ensureCtx() {
   if (state.ctx && state.ctx.sampleRate === state.sampleRate) return state.ctx;
   if (state.ctx) state.ctx.close();
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: state.sampleRate });
-  const master = buildMaster(ctx);
+  const master = buildMaster(ctx, currentDrive());
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.55;
@@ -438,6 +633,7 @@ function readParams() {
     bars: parseInt($('bars').value, 10),
     density: parseInt($('density').value, 10) / 100,
     chaos: parseInt($('chaos').value, 10) / 100,
+    repeat: parseInt($('repeat').value, 10) / 100,
     palette: $('palette').value,
   };
 }
@@ -453,7 +649,7 @@ function doGenerate(newSeed) {
   seedField.value = state.seed.toString(16).toUpperCase().padStart(8, '0');
 
   const p = readParams();
-  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette);
+  state.pattern = generatePattern(state.seed, p.bpm, p.bars, p.density, p.chaos, p.palette, p.repeat);
 
   // step -> events map for the live scheduler
   const map = new Map();
@@ -465,7 +661,8 @@ function doGenerate(newSeed) {
   state.nextStep = 0;
 
   logLine(`▓ GEN seed=${seedField.value} ${p.palette} ${p.bpm}bpm ${p.bars}bar ` +
-          `d${Math.round(p.density * 100)} c${Math.round(p.chaos * 100)} → ${state.pattern.events.length} events`, 'gen');
+          `d${Math.round(p.density * 100)} c${Math.round(p.chaos * 100)} r${Math.round(p.repeat * 100)}` +
+          ` → ${state.pattern.events.length} events`, 'gen');
   drawPatternGrid();
   glitchBurst();
 }
@@ -480,7 +677,7 @@ function schedulerTick() {
     const evs = state.stepMap.get(state.nextStep);
     if (evs) {
       for (const ev of evs) {
-        const when = state.nextTime + ev.jit * pat.stepDur;
+        const when = state.nextTime + ((ev.frac || 0) + ev.jit) * pat.stepDur;
         scheduleEvent(ctx, state.master.input, ev, Math.max(when, ctx.currentTime + 0.001));
         state.flashQueue.push({ time: when, type: ev.type, pan: ev.pan });
         logLine(fmtEvent(ev), 'ev');
@@ -495,8 +692,8 @@ function schedulerTick() {
 function fmtEvent(ev) {
   const tag = VOICE_TAGS[ev.type] || '???';
   const panStr = ev.pan < -0.05 ? `L${Math.round(-ev.pan * 99)}` : ev.pan > 0.05 ? `R${Math.round(ev.pan * 99)}` : 'C00';
-  const f = ev.f || ev.f0 || ev.c || ev.hp || 0;
-  return `[${String(ev.step).padStart(3, '0')}] ${tag} ${f ? Math.round(f) + 'Hz' : '----'} ${panStr}`;
+  const f = ev.f || ev.f0 || ev.c || ev.hp || (ev.freqs && ev.freqs[0]) || 0;
+  return `[${String(ev.step).padStart(3, '0')}] ${ev.rep ? '↻' : ' '}${tag} ${f ? Math.round(f) + 'Hz' : '----'} ${panStr}`;
 }
 
 async function play() {
@@ -540,10 +737,10 @@ async function exportWav() {
 
   try {
     const octx = new OfflineAudioContext(2, Math.ceil(dur * sr), sr);
-    const master = buildMaster(octx);
+    const master = buildMaster(octx, currentDrive());
     master.out.connect(octx.destination);
     for (const ev of pat.events) {
-      const when = 0.05 + ev.step * pat.stepDur + ev.jit * pat.stepDur;
+      const when = 0.05 + (ev.step + (ev.frac || 0) + ev.jit) * pat.stepDur;
       scheduleEvent(octx, master.input, ev, Math.max(when, 0));
     }
     const rendered = await octx.startRendering();
@@ -756,8 +953,20 @@ function bindUi() {
   $('palette').addEventListener('change', () => regenSameSeed());
   $('density').addEventListener('input', () => { $('densityVal').textContent = $('density').value; });
   $('chaos').addEventListener('input', () => { $('chaosVal').textContent = $('chaos').value; });
+  $('repeat').addEventListener('input', () => { $('repeatVal').textContent = $('repeat').value; });
   $('density').addEventListener('change', () => regenSameSeed());
   $('chaos').addEventListener('change', () => regenSameSeed());
+  $('repeat').addEventListener('change', () => regenSameSeed());
+
+  // DRIVE is a live master-bus control: no regen, just retune the gains
+  $('drive').addEventListener('input', () => {
+    $('driveVal').textContent = $('drive').value;
+    if (state.master) {
+      const dg = driveGains(currentDrive());
+      state.master.preDrive.gain.value = dg.pre;
+      state.master.postDrive.gain.value = dg.post;
+    }
+  });
 
   document.querySelectorAll('input[name=sr]').forEach(r =>
     r.addEventListener('change', () => {
