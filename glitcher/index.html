@@ -157,21 +157,6 @@
       <div class="subdiv dim">──[ M4ST3R 0UTPUT ]──────────</div>
 
       <div class="ctl">
-        <label for="busgain">BUS G41N <span id="busgainVal" class="val">15</span>% <span class="dim">(pre)</span></label>
-        <input id="busgain" type="range" min="0" max="200" value="15">
-      </div>
-
-      <div class="ctl">
-        <label for="drive">DR1V3 <span id="driveVal" class="val">20</span></label>
-        <input id="drive" type="range" min="0" max="100" value="20">
-      </div>
-
-      <div class="ctl">
-        <label for="glue">BUS C0MP <span id="glueVal" class="val">50</span></label>
-        <input id="glue" type="range" min="0" max="100" value="50">
-      </div>
-
-      <div class="ctl">
         <label for="tape">T4P3 S4T <span id="tapeVal" class="val">25</span></label>
         <input id="tape" type="range" min="0" max="100" value="25">
       </div>
@@ -217,7 +202,7 @@
   </section>
 
   <footer class="ftr dim">
-    6117ch3r v1.4 // output: drive → chaos lpf L/R → glue → tape → shelf → lim(20:1) → tanh → clip@-0.26dBFS // fx return pre-glue // no signal exceeds full scale
+    6117ch3r v1.5 // output: chaos lpf L/R → tape → shelf → lim(20:1) → tanh → clip@-0.26dBFS → vol // fx return pre-tape // no signal exceeds full scale
   </footer>
 
 </main>
