@@ -41,7 +41,7 @@ by four palettes:
 | R3V3RB S3ND | random per-event sends to a dark digital reverb (2.8 s damped noise-tail convolution — HF decays faster than lows, lowpassed return) |
 | P1NG-P0NG S3ND | random per-event sends to a tempo-synced ping-pong delay (dotted-eighth hops, hard-panned, dark filtered cross-feedback) |
 | BUS G41N | pre-master trim (defaults 15%, dial rescaled so there's lots of push above it) — drives the whole mastering chain harder or softer; interacts with drive/comp/sat |
-| BUS C0MP | master glue compressor (4:1, 10 ms/150 ms) — amount deepens threshold −2→−24 dB with auto makeup |
+| BUS C0MP | master glue compressor (3:1, 10 ms/150 ms) — amount deepens threshold −2→−30 dB with gentle auto makeup |
 | T4P3 S4T | tape saturation — gentle compensated tanh plus head-rolloff lowpass (13 kHz→7 kHz) |
 | H1-SH3LF CUT | high-shelf at 4.5 kHz, 0 to −24 dB — tames the harsh top end |
 | M4ST3R V0L | output level after the entire mastering chain (post-limiter, defaults 40%) — scales volume without changing the tone; capped at unity so output still can't exceed full scale |
@@ -53,9 +53,11 @@ Keyboard: `SPACE` play/stop · `G` generate · `E` export.
 ## Audio safety
 
 Master chain: gain → drive (compensated tanh) → chaos LPF pair (L/R) →
-glue compressor (4:1) → tape saturation (compensated tanh + rolloff) →
+glue compressor (3:1) → tape saturation (compensated tanh + rolloff) →
 high shelf → safety compressor (20:1, −6 dB threshold, 2 ms attack) →
-tanh soft-clip → brickwall clamp at ±0.97 (≈ −0.26 dBFS), 4× oversampled.
+unity-gain tanh soft-clip (soft ceiling ≈ 0.7) → brickwall clamp at
+±0.97 (≈ −0.26 dBFS), 4× oversampled. Drive and saturation stages are
+loudness-compensated so adding them changes character, not level.
 Reverb and delay returns re-enter at the glue compressor — inside the
 safety stages, so no setting can push the output past full scale.
 Nothing reaching your ears or the WAV file can exceed full scale.

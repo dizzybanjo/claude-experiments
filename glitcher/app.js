@@ -402,16 +402,18 @@ function getCrushCurve(levels) {
    FX returns re-enter at the glue comp, skipping drive and the
    jumping filters so tails stay smooth. The last two stages are
    fixed and guarantee output never exceeds full scale. */
+/* post gains track pre closely (exp ~0.75–0.8) so adding drive/sat adds
+   character, not loudness */
 function driveGains(drive01) {
-  const pre = 1 + drive01 * 11;
-  return { pre, post: 1 / Math.pow(pre, 0.55) };
+  const pre = 1 + drive01 * 8;
+  return { pre, post: 1 / Math.pow(pre, 0.8) };
 }
 function tapeGains(tape01) {
-  const pre = 1 + tape01 * 3;
-  return { pre, post: 1 / Math.pow(pre, 0.6) };
+  const pre = 1 + tape01 * 2.5;
+  return { pre, post: 1 / Math.pow(pre, 0.75) };
 }
 function glueSettings(glue01) {
-  return { threshold: -2 - glue01 * 22, makeup: 1 + glue01 * 0.9 };
+  return { threshold: -2 - glue01 * 14, makeup: 1 + glue01 * 0.3 };
 }
 const SHELF_FREQ = 4500;
 const tapeLPFreq = (tape01) => 13000 - tape01 * 6000; // head rolloff 13k→7k
@@ -419,14 +421,14 @@ const tapeLPFreq = (tape01) => 13000 - tape01 * 6000; // head rolloff 13k→7k
 function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGain: 1, vol: 0.9 }) {
   // BUS GAIN: pre-master trim — drives the whole chain harder or softer
   const input = ctx.createGain();
-  input.gain.value = 0.8 * ms.busGain;
+  input.gain.value = 0.65 * ms.busGain;
 
   // DRIVE: variable pre-gain into a fixed tanh stage, level-compensated.
   const dg = driveGains(ms.drive);
   const preDrive = ctx.createGain();
   preDrive.gain.value = dg.pre;
   const driveShaper = ctx.createWaveShaper();
-  driveShaper.curve = getDriveCurve(2.5);
+  driveShaper.curve = getDriveCurve(2);
   driveShaper.oversample = '2x';
   const postDrive = ctx.createGain();
   postDrive.gain.value = dg.post;
@@ -447,8 +449,8 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGai
   const gs = glueSettings(ms.glue);
   const busComp = ctx.createDynamicsCompressor();
   busComp.threshold.value = gs.threshold;
-  busComp.knee.value = 6;
-  busComp.ratio.value = 4;
+  busComp.knee.value = 9;
+  busComp.ratio.value = 3;
   busComp.attack.value = 0.01;
   busComp.release.value = 0.15;
   const makeup = ctx.createGain();
@@ -482,12 +484,13 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGai
   comp.attack.value = 0.002;
   comp.release.value = 0.08;
 
-  // hard safety clipper: soft tanh drive into an absolute clamp
+  // hard safety clipper: unity-gain tanh (transparent below the knee,
+  // soft ceiling ~0.7) into an absolute clamp
   const clip = ctx.createWaveShaper();
   const curve = new Float32Array(4096);
   for (let i = 0; i < 4096; i++) {
     const x = (i / 4095) * 2 - 1;
-    let y = Math.tanh(x * 1.4) / Math.tanh(1.4);
+    let y = Math.tanh(x * 1.2) / 1.2;
     curve[i] = Math.max(-0.97, Math.min(0.97, y));
   }
   clip.curve = curve;
@@ -1015,7 +1018,7 @@ function applyMasterLive() {
   const m = state.master;
   if (!m) return;
   const ms = masterSettings();
-  m.input.gain.value = 0.8 * ms.busGain;
+  m.input.gain.value = 0.65 * ms.busGain;
   m.out.gain.value = Math.min(1, 0.95 * ms.vol);
   const dg = driveGains(ms.drive);
   m.preDrive.gain.value = dg.pre;
