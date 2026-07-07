@@ -416,9 +416,10 @@ function glueSettings(glue01) {
 const SHELF_FREQ = 4500;
 const tapeLPFreq = (tape01) => 13000 - tape01 * 6000; // head rolloff 13k→7k
 
-function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
+function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGain: 1, vol: 0.9 }) {
+  // BUS GAIN: pre-master trim — drives the whole chain harder or softer
   const input = ctx.createGain();
-  input.gain.value = 0.8;
+  input.gain.value = 0.8 * ms.busGain;
 
   // DRIVE: variable pre-gain into a fixed tanh stage, level-compensated.
   const dg = driveGains(ms.drive);
@@ -492,8 +493,10 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
   clip.curve = curve;
   clip.oversample = '4x';
 
+  // MASTER VOLUME: post-mastering-bus level — after the limiter/clipper,
+  // so it only scales the final output and never changes the chain's tone
   const out = ctx.createGain();
-  out.gain.value = 0.95;
+  out.gain.value = 0.95 * ms.vol;
 
   input.connect(preDrive).connect(driveShaper).connect(postDrive).connect(split);
   split.connect(lpfL, 0);
@@ -999,6 +1002,8 @@ function masterSettings() {
     shelfCut: parseInt($('shelf').value, 10),
     tape: parseInt($('tape').value, 10) / 100,
     glue: parseInt($('glue').value, 10) / 100,
+    busGain: parseInt($('busgain').value, 10) / 100,
+    vol: parseInt($('vol').value, 10) / 100,
   };
 }
 
@@ -1007,6 +1012,8 @@ function applyMasterLive() {
   const m = state.master;
   if (!m) return;
   const ms = masterSettings();
+  m.input.gain.value = 0.8 * ms.busGain;
+  m.out.gain.value = 0.95 * ms.vol;
   const dg = driveGains(ms.drive);
   m.preDrive.gain.value = dg.pre;
   m.postDrive.gain.value = dg.post;
@@ -1483,7 +1490,8 @@ function bindUi() {
 
   // master-bus controls are live: no regen, just retune the chain
   for (const [id, valId] of [['drive', 'driveVal'], ['shelf', 'shelfVal'],
-                             ['tape', 'tapeVal'], ['glue', 'glueVal']]) {
+                             ['tape', 'tapeVal'], ['glue', 'glueVal'],
+                             ['busgain', 'busgainVal'], ['vol', 'volVal']]) {
     $(id).addEventListener('input', () => {
       $(valId).textContent = $(id).value;
       applyMasterLive();

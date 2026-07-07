@@ -40,9 +40,11 @@ by four palettes:
 | F1LT3R CH40S | stereo pair of resonant lowpass filters on the master bus; seeded jumps locked to pattern-event positions yank each channel's cutoff (120 Hz–9 kHz, Q 3–16) then glide it back open — snap cuts and dive-sweeps, L/R/both |
 | R3V3RB S3ND | random per-event sends to a dark digital reverb (2.8 s damped noise-tail convolution — HF decays faster than lows, lowpassed return) |
 | P1NG-P0NG S3ND | random per-event sends to a tempo-synced ping-pong delay (dotted-eighth hops, hard-panned, dark filtered cross-feedback) |
+| BUS G41N | pre-master trim (0–200%) — drives the whole mastering chain harder or softer; interacts with drive/comp/sat |
 | BUS C0MP | master glue compressor (4:1, 10 ms/150 ms) — amount deepens threshold −2→−24 dB with auto makeup |
 | T4P3 S4T | tape saturation — gentle compensated tanh plus head-rolloff lowpass (13 kHz→7 kHz) |
 | H1-SH3LF CUT | high-shelf at 4.5 kHz, 0 to −24 dB — tames the harsh top end |
+| M4ST3R V0L | output level after the entire mastering chain (post-limiter, defaults 90%) — scales volume without changing the tone |
 | SAMPLE RATE | 44.1 kHz or 48 kHz (live + export) |
 | EXPORT WAV | offline-renders the sequence to stereo 16-bit PCM WAV |
 
