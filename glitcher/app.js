@@ -1606,5 +1606,5 @@ window.addEventListener('DOMContentLoaded', () => {
   $('seed').value = state.seed.toString(16).toUpperCase().padStart(8, '0');
   doGenerate(false);
   drawViz();
-  logLine('6117CH3R v1.0 // audio unit ready // SPACE=run G=gen E=export', 'sys');
+  logLine('6117CH3R v2.0 // audio unit ready // SPACE=run G=gen E=export', 'sys');
 });
