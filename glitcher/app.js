@@ -29,10 +29,10 @@ function pickWeighted(rng, weights) {
 
 /* ── voice palettes (probability weights per voice type) ────────── */
 const PALETTES = {
-  V01D:  { blip: 30, click: 22, crackle: 12, noise: 10, sub: 10, hiss: 8, modem: 4, stutter: 2, crush: 2 },
-  '4C1D': { sub: 18, zap: 15, blip: 12, stutter: 12, fm: 8, click: 8, grind: 7, noise: 6, crush: 6, tape: 5, modem: 2, crackle: 1 },
-  M3T4L: { fm: 20, crush: 14, stutter: 14, grind: 11, noise: 10, click: 8, crackle: 6, zap: 6, tape: 5, databend: 4, sub: 4, blip: 3 },
-  D4T4:  { databend: 22, modem: 18, tape: 14, crush: 12, crackle: 10, stutter: 10, grind: 8, click: 6, noise: 4, blip: 2, hiss: 2 },
+  V01D:  { click: 30, blip: 18, crackle: 14, sub: 12, noise: 8, hiss: 6, fm: 6, stutter: 4, databend: 2 },
+  '4C1D': { sub: 20, click: 14, stutter: 12, blip: 10, fm: 10, zap: 8, grind: 8, noise: 6, crush: 6, tape: 4, crackle: 2 },
+  M3T4L: { fm: 26, stutter: 15, crush: 12, grind: 12, click: 10, databend: 8, noise: 6, crackle: 5, zap: 3, sub: 3 },
+  D4T4:  { databend: 28, tape: 16, crush: 14, stutter: 12, crackle: 10, click: 8, grind: 6, noise: 4, hiss: 2 },
 };
 
 /* ── tonal system ───────────────────────────────────────────────── */
@@ -62,28 +62,28 @@ function generateEvent(rng, type, chaos, stepDur) {
   const ev = { type, pan: rrange(rng, -0.9, 0.9), jit: chaos * rrange(rng, -0.25, 0.25) };
   switch (type) {
     case 'click':
-      ev.hp = rexp(rng, 800, 9000);
-      ev.dur = rrange(rng, 0.003, 0.012);
-      ev.g = rrange(rng, 0.4, 0.9);
-      break;
-    case 'blip':
-      ev.f = rexp(rng, 900, 13000);
-      ev.wave = rng() < 0.8 ? 'sine' : 'square';
-      ev.dur = rrange(rng, 0.015, 0.09 + chaos * 0.1);
-      ev.g = rrange(rng, 0.25, 0.6);
-      ev.slide = rng() < chaos * 0.6 ? rexp(rng, 0.25, 4) : 1;
-      break;
-    case 'noise':
-      ev.f = rexp(rng, 300, 11000);
-      ev.q = rexp(rng, 0.7, 14);
-      ev.dur = rrange(rng, 0.02, 0.12 + chaos * 0.25);
+      ev.hp = rexp(rng, 600, 5500);
+      ev.dur = rrange(rng, 0.002, 0.01);
       ev.g = rrange(rng, 0.3, 0.7);
       break;
+    case 'blip':
+      ev.f = rexp(rng, 220, 3800);
+      ev.wave = rng() < 0.7 ? 'sine' : 'triangle';
+      ev.dur = rrange(rng, 0.01, 0.05 + chaos * 0.05);
+      ev.g = rrange(rng, 0.18, 0.42);
+      ev.slide = rng() < chaos * 0.5 ? rexp(rng, 0.4, 2.5) : 1;
+      break;
+    case 'noise':
+      ev.f = rexp(rng, 200, 6500);
+      ev.q = rexp(rng, 1, 16);
+      ev.dur = rrange(rng, 0.015, 0.08 + chaos * 0.15);
+      ev.g = rrange(rng, 0.22, 0.5);
+      break;
     case 'hiss':
-      ev.f = rexp(rng, 4000, 14000);
-      ev.q = rrange(rng, 0.4, 1.2);
+      ev.f = rexp(rng, 2500, 8000);
+      ev.q = rrange(rng, 0.5, 1.4);
       ev.dur = rrange(rng, 0.2, 0.9);
-      ev.g = rrange(rng, 0.06, 0.16);
+      ev.g = rrange(rng, 0.03, 0.09);
       break;
     case 'sub':
       ev.f0 = rrange(rng, 90, 200);
@@ -92,53 +92,53 @@ function generateEvent(rng, type, chaos, stepDur) {
       ev.g = rrange(rng, 0.6, 0.95);
       ev.pan *= 0.25; // keep lows near center
       break;
-    case 'zap':
-      ev.f0 = rexp(rng, 1800, 9000);
-      ev.f1 = rexp(rng, 50, 400);
-      ev.dur = rrange(rng, 0.04, 0.18);
-      ev.q = rrange(rng, 4, 14);
-      ev.g = rrange(rng, 0.3, 0.6);
+    case 'zap':    // dark resonant dive — filter sweep, not laser gun
+      ev.f0 = rexp(rng, 600, 2800);
+      ev.f1 = rexp(rng, 45, 250);
+      ev.dur = rrange(rng, 0.05, 0.16);
+      ev.q = rrange(rng, 3, 9);
+      ev.g = rrange(rng, 0.22, 0.42);
       break;
     case 'fm':
-      ev.c = rexp(rng, 180, 2400);
+      ev.c = rexp(rng, 120, 1600);
       ev.ratio = rpick(rng, [1.401, 1.732, 2.417, 3.142, 4.236, 5.813, 7.31]);
-      ev.idx = rexp(rng, 150, 2800);
-      ev.dur = rrange(rng, 0.04, 0.25 + chaos * 0.3);
-      ev.g = rrange(rng, 0.25, 0.55);
+      ev.idx = rexp(rng, 120, 1800);
+      ev.dur = rrange(rng, 0.04, 0.22 + chaos * 0.25);
+      ev.g = rrange(rng, 0.2, 0.45);
       break;
     case 'stutter': {
       ev.n = rint(rng, 3, 4 + Math.round(chaos * 8));
       ev.iv = Math.max(0.012, (stepDur * rrange(rng, 0.9, 2.2)) / ev.n);
-      ev.f = rexp(rng, 400, 8000);
+      ev.f = rexp(rng, 250, 3500);
       ev.sdur = Math.min(ev.iv * 0.8, rrange(rng, 0.008, 0.03));
-      ev.g = rrange(rng, 0.3, 0.6);
+      ev.g = rrange(rng, 0.25, 0.5);
       ev.decay = rrange(rng, 0.6, 1.05);
-      ev.noise = rng() < 0.4;
+      ev.noise = rng() < 0.45;
       break;
     }
     case 'crackle': {
-      ev.n = rint(rng, 6, 10 + Math.round(chaos * 24));
+      ev.n = rint(rng, 4, 7 + Math.round(chaos * 16));
       ev.dur = rrange(rng, 0.05, 0.4);
-      ev.hp = rexp(rng, 2000, 9000);
+      ev.hp = rexp(rng, 1200, 5500);
       ev.offs = []; ev.amps = [];
       for (let i = 0; i < ev.n; i++) {
         ev.offs.push(rng() * ev.dur);
-        ev.amps.push(rrange(rng, 0.15, 0.8));
+        ev.amps.push(rrange(rng, 0.1, 0.55));
       }
       break;
     }
-    case 'crush':
-      ev.f = rexp(rng, 150, 3000);
+    case 'crush':  // quantized sine — digital artifact, not chip lead
+      ev.f = rexp(rng, 90, 1400);
       ev.levels = rint(rng, 2, 6);
-      ev.dur = rrange(rng, 0.04, 0.2 + chaos * 0.25);
-      ev.g = rrange(rng, 0.25, 0.5);
-      ev.bp = rexp(rng, 400, 6000);
+      ev.dur = rrange(rng, 0.04, 0.18 + chaos * 0.2);
+      ev.g = rrange(rng, 0.22, 0.45);
+      ev.bp = rexp(rng, 250, 3500);
       break;
     case 'tape':   // tape-stop pitch plunge
-      ev.f = rexp(rng, 250, 2200);
-      ev.wave = rng() < 0.6 ? 'sawtooth' : 'square';
+      ev.f = rexp(rng, 180, 1400);
+      ev.wave = rng() < 0.6 ? 'sawtooth' : 'triangle';
       ev.dur = rrange(rng, 0.15, 0.5 + chaos * 0.3);
-      ev.g = rrange(rng, 0.2, 0.45);
+      ev.g = rrange(rng, 0.16, 0.36);
       ev.drop = rrange(rng, 0.015, 0.06); // final freq ratio
       break;
     case 'databend': { // corrupted buffer: noise with hard playbackRate jumps
@@ -149,32 +149,19 @@ function generateEvent(rng, type, chaos, stepDur) {
         // jitter inside each slot keeps times strictly increasing
         ev.segT.push(((i + rng() * 0.9) / segs) * ev.dur);
         ev.rates.push(rexp(rng, 0.08, 4));
-        ev.bfs.push(rexp(rng, 300, 9000));
+        ev.bfs.push(rexp(rng, 250, 5500));
       }
       ev.segT[0] = 0;
       ev.q = rrange(rng, 1, 8);
-      ev.g = rrange(rng, 0.3, 0.6);
-      break;
-    }
-    case 'modem': { // FSK carrier chatter, dial-up style
-      ev.n = rint(rng, 6, 10 + Math.round(chaos * 14));
-      ev.iv = rrange(rng, 0.012, 0.04);
-      ev.dur = ev.n * ev.iv;
-      ev.freqs = []; ev.gates = [];
-      const base = rpick(rng, [600, 800, 1200, 1600, 2100]);
-      for (let i = 0; i < ev.n; i++) {
-        ev.freqs.push(base * rpick(rng, [0.5, 1, 1, 1.5, 2, 3]));
-        ev.gates.push(rng() < 0.82);
-      }
-      ev.g = rrange(rng, 0.2, 0.4);
+      ev.g = rrange(rng, 0.25, 0.5);
       break;
     }
     case 'grind':  // overdriven low growl
       ev.f = rexp(rng, 40, 220);
       ev.dur = rrange(rng, 0.08, 0.3 + chaos * 0.2);
       ev.k = rint(rng, 4, 24);           // waveshaper drive
-      ev.lp = rexp(rng, 300, 2400);
-      ev.g = rrange(rng, 0.3, 0.55);
+      ev.lp = rexp(rng, 300, 1800);
+      ev.g = rrange(rng, 0.28, 0.5);
       ev.det = rrange(rng, 3, 25);       // detune cents-ish (Hz offset)
       break;
     case 'kick':   // pitch-drop sine kick + click transient
@@ -205,13 +192,13 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
   if (Object.keys(weights).length === 0) weights = Object.assign({}, base);
 
   const events = []; // { step, frac, ...voice params }
-  const baseProb = 0.12 + density * 0.72;
+  const baseProb = 0.08 + density * 0.6;
 
   for (let s = 0; s < steps; s++) {
     let prob = baseProb;
     if (s % 8 === 0) prob = Math.min(1, prob * 1.5);   // downbeat emphasis
     if (s % 16 === 12) prob *= 0.6;                     // breathe before bar turn
-    const hits = rng() < prob ? (rng() < chaos * 0.45 ? 2 : 1) : 0;
+    const hits = rng() < prob ? (rng() < chaos * 0.3 ? 2 : 1) : 0;
     for (let h = 0; h < hits; h++) {
       let type = pickWeighted(rng, weights);
       if (s % 16 === 0 && weights.sub > 0 && rng() < 0.4) type = 'sub';
@@ -326,16 +313,15 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
         const abs = pos + (e.step + (e.frac || 0) - start) * scale;
         if (abs >= steps) continue;
         const c = Object.assign({}, e);
-        for (const key of ['offs', 'amps', 'segT', 'rates', 'bfs', 'freqs', 'gates'])
+        for (const key of ['offs', 'amps', 'segT', 'rates', 'bfs'])
           if (c[key]) c[key] = c[key].slice();
         c.rep = true;
         c.step = Math.floor(abs);
         c.frac = abs - c.step;
         const pr = Math.pow(pitchRatio, r);
         for (const key of ['f', 'f0', 'f1', 'c', 'hp', 'bp'])
-          if (c[key]) c[key] = Math.min(16000, c[key] * pr);
-        if (c.freqs) c.freqs = c.freqs.map(x => Math.min(16000, x * pr));
-        if (c.bfs) c.bfs = c.bfs.map(x => Math.min(16000, x * pr));
+          if (c[key]) c[key] = Math.min(12000, c[key] * pr);
+        if (c.bfs) c.bfs = c.bfs.map(x => Math.min(12000, x * pr));
         const gd = Math.pow(gainDecay, r);
         if (c.g) c.g *= gd;
         if (c.amps) c.amps = c.amps.map(a => a * gd);
@@ -427,8 +413,8 @@ function tapeGains(tape01) {
 function glueSettings(glue01) {
   return { threshold: -2 - glue01 * 22, makeup: 1 + glue01 * 0.9 };
 }
-const SHELF_FREQ = 5500;
-const tapeLPFreq = (tape01) => 18000 - tape01 * 9000; // head rolloff 18k→9k
+const SHELF_FREQ = 4500;
+const tapeLPFreq = (tape01) => 13000 - tape01 * 6000; // head rolloff 13k→7k
 
 function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
   const input = ctx.createGain();
@@ -451,7 +437,7 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0 }) {
   const lpfR = ctx.createBiquadFilter();
   for (const f of [lpfL, lpfR]) {
     f.type = 'lowpass';
-    f.frequency.value = 16000;
+    f.frequency.value = 13000;
     f.Q.value = 0.8;
   }
   const merge = ctx.createChannelMerger(2);
@@ -533,10 +519,10 @@ function scheduleFilterJump(master, j, t) {
     if (j.mode === 'snap') {
       f.setValueAtTime(j.f, t);
     } else {
-      f.setValueAtTime(16000, t);
+      f.setValueAtTime(13000, t);
       f.exponentialRampToValueAtTime(j.f, t + j.glide * 0.4);
     }
-    f.exponentialRampToValueAtTime(16000, t + j.glide);
+    f.exponentialRampToValueAtTime(13000, t + j.glide);
     q.setValueAtTime(j.q, t);
     q.linearRampToValueAtTime(0.8, t + j.glide);
   }
@@ -547,22 +533,27 @@ const irCache = new WeakMap();
 function getVerbIR(ctx) {
   let ir = irCache.get(ctx);
   if (!ir) {
-    const sr = ctx.sampleRate, dur = 2.4, len = Math.floor(sr * dur);
+    const sr = ctx.sampleRate, dur = 2.8, len = Math.floor(sr * dur);
     ir = ctx.createBuffer(2, len, sr);
     const rng = mulberry32(0x51A7E5);
     for (let ch = 0; ch < 2; ch++) {
       const d = ir.getChannelData(ch);
-      // sparse bright early reflections, first 90ms
-      for (let k = 0; k < 14; k++) {
+      // sparse early reflections, first 90ms
+      for (let k = 0; k < 10; k++) {
         const i = Math.floor(rng() * sr * 0.09);
-        if (i < len) d[i] += (rng() * 2 - 1) * 0.6;
+        if (i < len) d[i] += (rng() * 2 - 1) * 0.45;
       }
-      // dense decaying tail — kept full-bandwidth for that bright
-      // late-80s digital sheen
+      // dense decaying tail with progressive HF damping: a one-pole
+      // lowpass whose cutoff falls as the tail decays, so the space
+      // darkens as it rings out
+      let lp = 0;
       for (let i = 0; i < len; i++) {
         const t = i / sr;
         const envIn = t < 0.012 ? t / 0.012 : 1;
-        d[i] += (rng() * 2 - 1) * Math.exp(-3.2 * t / dur) * envIn * 0.5;
+        const cutoff = 6500 * Math.exp(-1.4 * t / dur) + 500;
+        const a = 1 - Math.exp(-2 * Math.PI * cutoff / sr);
+        lp += a * ((rng() * 2 - 1) - lp);
+        d[i] += lp * Math.exp(-3.0 * t / dur) * envIn * 0.9;
       }
     }
     irCache.set(ctx, ir);
@@ -577,9 +568,11 @@ function buildFx(ctx, returnNode) {
   conv.buffer = getVerbIR(ctx);
   const verbHP = ctx.createBiquadFilter();
   verbHP.type = 'highpass'; verbHP.frequency.value = 220;
+  const verbLP = ctx.createBiquadFilter();
+  verbLP.type = 'lowpass'; verbLP.frequency.value = 5500; verbLP.Q.value = 0.5;
   const verbOut = ctx.createGain();
   verbOut.gain.value = 0.8;
-  verbIn.connect(conv).connect(verbHP).connect(verbOut).connect(returnNode);
+  verbIn.connect(conv).connect(verbHP).connect(verbLP).connect(verbOut).connect(returnNode);
 
   // ping-pong delay: L → R → feedback → L, hard-panned taps
   const dlyIn = ctx.createGain();
@@ -588,7 +581,7 @@ function buildFx(ctx, returnNode) {
   const fb = ctx.createGain();
   fb.gain.value = 0.42;
   const fbTone = ctx.createBiquadFilter();
-  fbTone.type = 'lowpass'; fbTone.frequency.value = 3800;
+  fbTone.type = 'lowpass'; fbTone.frequency.value = 2800;
   const panL = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
   const panR = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
   if (panL.pan) { panL.pan.value = -0.85; panR.pan.value = 0.85; }
@@ -740,7 +733,7 @@ function scheduleEvent(ctx, dest, ev, when, fx) {
           src.start(t); src.stop(t + ev.sdur + 0.02);
         } else {
           const o = ctx.createOscillator();
-          o.type = 'square'; o.frequency.value = ev.f;
+          o.type = 'sine'; o.frequency.value = ev.f;
           o.connect(g).connect(out);
           o.start(t); o.stop(t + ev.sdur + 0.02);
         }
@@ -762,7 +755,7 @@ function scheduleEvent(ctx, dest, ev, when, fx) {
     }
     case 'crush': {
       const o = ctx.createOscillator();
-      o.type = 'square'; o.frequency.value = ev.f;
+      o.type = 'sine'; o.frequency.value = ev.f;
       const ws = ctx.createWaveShaper();
       ws.curve = getCrushCurve(ev.levels);
       const bp = ctx.createBiquadFilter();
@@ -808,21 +801,6 @@ function scheduleEvent(ctx, dest, ev, when, fx) {
       src.start(when); src.stop(when + ev.dur + 0.03);
       break;
     }
-    case 'modem': {
-      const o = ctx.createOscillator();
-      o.type = 'square';
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, when);
-      for (let i = 0; i < ev.n; i++) {
-        const t = when + i * ev.iv;
-        o.frequency.setValueAtTime(ev.freqs[i], t);
-        g.gain.setValueAtTime(ev.gates[i] ? ev.g : 0.0001, t);
-      }
-      g.gain.setValueAtTime(0.0001, when + ev.dur);
-      o.connect(g).connect(out);
-      o.start(when); o.stop(when + ev.dur + 0.02);
-      break;
-    }
     case 'grind': {
       const o1 = ctx.createOscillator();
       const o2 = ctx.createOscillator();
@@ -856,7 +834,7 @@ function scheduleEvent(ctx, dest, ev, when, fx) {
       // acid filter: opens on the pluck, sweeps shut over the note
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass'; lp.Q.value = ev.res;
-      lp.frequency.setValueAtTime(Math.min(16000, ev.cutoff * 2.5), when);
+      lp.frequency.setValueAtTime(Math.min(12000, ev.cutoff * 2.5), when);
       lp.frequency.exponentialRampToValueAtTime(Math.max(60, ev.cutoff * 0.5), when + ev.dur * 0.7);
       const g = ctx.createGain();
       env(g.gain, when, ev.g, ev.dur, 0.004);
@@ -971,18 +949,17 @@ const state = {
 const VOICE_TAGS = {
   kick: 'KCK', bass: 'BSS', pad: 'P4D', click: 'CLK', blip: 'BLP', noise: 'NSE',
   hiss: 'HSS', sub: 'SUB', zap: 'ZAP', fm: 'FM_', stutter: 'STT', crackle: 'CRK',
-  crush: 'CRH', tape: 'TPS', databend: 'DBN', modem: 'MDM', grind: 'GRD',
+  crush: 'CRH', tape: 'TPS', databend: 'DBN', grind: 'GRD',
 };
 const VOICE_NAMES = {
   kick: 'kick drum', bass: 'bassline', pad: 'pad chords', click: 'impulse click',
   blip: 'sine blip', noise: 'noise burst', hiss: 'hiss wash', sub: 'sub drop',
-  zap: 'filter zap', fm: 'fm metal', stutter: 'stutter ratchet', crackle: 'crackle',
-  crush: 'bitcrush tone', tape: 'tape stop', databend: 'databend',
-  modem: 'modem fsk', grind: 'grind saw',
+  zap: 'filter dive', fm: 'fm metal', stutter: 'stutter ratchet', crackle: 'crackle',
+  crush: 'bitcrush tone', tape: 'tape stop', databend: 'databend', grind: 'grind saw',
 };
 const VOICE_ORDER = ['kick', 'bass', 'pad', 'sub', 'click', 'blip', 'noise', 'hiss',
                      'zap', 'fm', 'stutter', 'crackle', 'crush', 'tape', 'databend',
-                     'modem', 'grind'];
+                     'grind'];
 
 /* per-voice modifiers: lvl gain ×, pit pitch ×, dec time ×, wgt weight × */
 const voiceParams = {};
@@ -990,7 +967,7 @@ for (const t of VOICE_ORDER) voiceParams[t] = { lvl: 1, pit: 1, dec: 1, wgt: 1 }
 
 const PITCH_KEYS = ['f', 'f0', 'f1', 'f2', 'c', 'hp', 'bp', 'lp', 'cutoff'];
 const TIME_KEYS = ['dur', 'iv', 'sdur', 'att'];
-const clampF = (v) => Math.min(18000, Math.max(10, v));
+const clampF = (v) => Math.min(12000, Math.max(10, v));
 
 /* applied at schedule time (live + export), so LVL/PIT/DEC react instantly
    without regenerating the pattern */
@@ -1000,7 +977,6 @@ function applyVoiceMods(ev) {
   const c = Object.assign({}, ev);
   if (m.pit !== 1) {
     for (const k of PITCH_KEYS) if (c[k] !== undefined) c[k] = clampF(c[k] * m.pit);
-    if (c.freqs) c.freqs = c.freqs.map(x => clampF(x * m.pit));
     if (c.bfs) c.bfs = c.bfs.map(x => clampF(x * m.pit));
     if (c.fs) c.fs = c.fs.map(x => clampF(x * m.pit));
   }
@@ -1159,7 +1135,7 @@ function schedulerTick() {
 function fmtEvent(ev) {
   const tag = VOICE_TAGS[ev.type] || '???';
   const panStr = ev.pan < -0.05 ? `L${Math.round(-ev.pan * 99)}` : ev.pan > 0.05 ? `R${Math.round(ev.pan * 99)}` : 'C00';
-  const f = ev.f || ev.f0 || ev.c || ev.hp || (ev.freqs && ev.freqs[0]) || (ev.fs && ev.fs[0]) || 0;
+  const f = ev.f || ev.f0 || ev.c || ev.hp || (ev.fs && ev.fs[0]) || 0;
   return `[${String(ev.step).padStart(3, '0')}] ${ev.rep ? '↻' : ' '}${tag} ${f ? Math.round(f) + 'Hz' : '----'} ${panStr}`;
 }
 

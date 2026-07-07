@@ -527,8 +527,8 @@
           <div class="chart-wrap"><canvas id="chart-days-active"></canvas></div>
         </div>
         <div class="chart-card" style="grid-column: 1 / -1;">
-          <h3>Time of Day — All Sessions</h3>
-          <p class="sub">App opens per hour of day (from app opened events)</p>
+          <h3>Time of Day — All Usage</h3>
+          <p class="sub">Total app events per hour of day (all activity)</p>
           <div class="chart-wrap" style="height:280px;"><canvas id="chart-overall-tod"></canvas></div>
         </div>
       </div>
@@ -598,6 +598,11 @@
           <h3>Session Length Over Time</h3>
           <p class="sub">Average session duration per week or month</p>
           <div class="chart-wrap"><canvas id="chart-session-length-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Median Session Length Over Time</h3>
+          <p class="sub">Median session duration per week or month (robust to outliers)</p>
+          <div class="chart-wrap"><canvas id="chart-session-length-median"></canvas></div>
         </div>
         <div class="chart-card">
           <h3>Session Frequency per User</h3>
@@ -1896,6 +1901,13 @@ function parseActionTimestamp(action) {
 }
 
 // Build sessions from app "opened" / "last seen" event pairs, matched by Entity ID (session UUID)
+function median(arr) {
+  if (!arr || !arr.length) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 function buildAppSessions(data) {
   const bySession = {};
   data.forEach(r => {
@@ -1930,7 +1942,7 @@ function buildAppSessions(data) {
 
 // ---- session charts ----
 function renderSessionCharts() {
-  const SESSION_CHART_IDS = ['chart-session-length-avg','chart-session-length-user','chart-session-length-time','chart-session-freq','chart-sessions-per-week'];
+  const SESSION_CHART_IDS = ['chart-session-length-avg','chart-session-length-user','chart-session-length-time','chart-session-length-median','chart-session-freq','chart-sessions-per-week'];
   if (!sessionData.length) { SESSION_CHART_IDS.forEach(id => destroyChart(id)); return; }
 
   // Average session length across all users
@@ -1971,6 +1983,11 @@ function renderSessionCharts() {
   renderLineChart('chart-session-length-time', tbLabels,
     tbLabels.map(k => +(timeBuckets[k].reduce((a,b) => a+b, 0) / timeBuckets[k].length).toFixed(1)),
     PALETTE[3], 'avg mins');
+
+  // Median session length over time (same buckets as above)
+  renderLineChart('chart-session-length-median', tbLabels,
+    tbLabels.map(k => +median(timeBuckets[k]).toFixed(1)),
+    PALETTE[5], 'median mins');
 
   // Session frequency per user
   const userCount = {};
@@ -2141,12 +2158,8 @@ function renderChurnCharts() {
 
 // ---- overall time of day ----
 function renderOverallTimeOfDay() {
-  const openedEvents = filteredData.filter(r =>
-    (r[cols.type] || '').toLowerCase() === 'app' &&
-    (r[cols.action] || '').toLowerCase().startsWith('opened')
-  );
   const hourCounts = new Array(24).fill(0);
-  openedEvents.forEach(r => {
+  filteredData.forEach(r => {
     const ts = parseActionTimestamp(r[cols.action]) || parseDate(r[cols.datetime]);
     if (!ts) return;
     hourCounts[ts.getHours()]++;
@@ -2176,13 +2189,13 @@ function renderOverallTimeOfDay() {
         tooltip: {
           backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
           titleColor: '#e2e8f0', bodyColor: '#94a3b8',
-          callbacks: { label: c => ` ${c.parsed.y} opens` }
+          callbacks: { label: c => ` ${c.parsed.y} events` }
         }
       },
       scales: {
         x: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { color: '#1e2235' } },
         y: { beginAtZero: true, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
-          title: { display: true, text: 'App opens', color: '#475569', font: { size: 11 } } }
+          title: { display: true, text: 'Events', color: '#475569', font: { size: 11 } } }
       }
     }
   });

@@ -66,9 +66,9 @@
         <label for="palette">PALETTE</label>
         <select id="palette">
           <option value="V01D">V01D — sine/click minimal</option>
-          <option value="4C1D" selected>4C1D — subs/zaps/acid</option>
+          <option value="4C1D" selected>4C1D — subs/dives/acid</option>
           <option value="M3T4L">M3T4L — fm/metal/granular</option>
-          <option value="D4T4">D4T4 — databend/modem/mosh</option>
+          <option value="D4T4">D4T4 — databend/tape/mosh</option>
         </select>
       </div>
 
@@ -172,8 +172,8 @@
       </div>
 
       <div class="ctl">
-        <label for="shelf">H1-SH3LF CUT <span id="shelfVal" class="val">6</span>dB @5.5k</label>
-        <input id="shelf" type="range" min="0" max="24" value="6">
+        <label for="shelf">H1-SH3LF CUT <span id="shelfVal" class="val">8</span>dB @4.5k</label>
+        <input id="shelf" type="range" min="0" max="24" value="8">
       </div>
 
       <div class="ctl">
@@ -207,7 +207,7 @@
   </section>
 
   <footer class="ftr dim">
-    6117ch3r v1.3 // output: drive → chaos lpf L/R → glue → tape → shelf → lim(20:1) → tanh → clip@-0.26dBFS // fx return pre-glue // no signal exceeds full scale
+    6117ch3r v1.4 // output: drive → chaos lpf L/R → glue → tape → shelf → lim(20:1) → tanh → clip@-0.26dBFS // fx return pre-glue // no signal exceeds full scale
   </footer>
 
 </main>
