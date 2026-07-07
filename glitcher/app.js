@@ -247,11 +247,13 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
         const deg = rng() < 0.35 ? lastDeg : rpick(rng, degPool);
         lastDeg = deg;
         const f = degFreq(rootMidi, scale, deg);
+        // long saw notes with a fast squelching resonant-LP pluck
         const ev = {
           type: 'bass', step: s, pan: rrange(rng, -0.15, 0.15), jit: 0,
-          f, dur: stepDur * rrange(rng, 0.9, 2.4), g: rrange(rng, 0.5, 0.75),
-          cutoff: f * rrange(rng, 3, 9), res: rrange(rng, 2, 11),
-          wave: rng() < 0.7 ? 'sawtooth' : 'square',
+          f, dur: stepDur * rrange(rng, 2, 4.5), g: rrange(rng, 0.45, 0.65),
+          cutoff: f * rrange(rng, 2, 6), res: rrange(rng, 7, 15),
+          envDecay: rrange(rng, 0.25, 0.55), // squelch close, fraction of dur
+          wave: 'sawtooth',
         };
         if (rng() < 0.22 + chaos * 0.2) ev.f2 = degFreq(rootMidi, scale, rpick(rng, degPool)); // slide
         if (rng() < 0.2) ev.dly = rrange(rng, 0.15, 0.4);
@@ -350,7 +352,22 @@ function generatePattern(seed, bpm, bars, density, chaos, palette, repeat, kick 
     }
   }
 
-  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, kick, flt, events, fjumps };
+  /* ── spectral smear jumps: seeded band re-tunes on the two smear buses ── */
+  const sjumps = [];
+  for (let s = 0; s < steps; s++) {
+    if (rng() < 0.05 + chaos * 0.1) {
+      sjumps.push({
+        step: s, frac: rng(),
+        bus: rng() < 0.5 ? 'pad' : 'drum',
+        band: rint(rng, 0, SMEAR_BANDS - 1),
+        f: rexp(rng, 150, 5000),
+        dt: rrange(rng, 0.03, 0.6),
+        fb: rrange(rng, 0.25, 0.65),
+      });
+    }
+  }
+
+  return { seed, bpm, bars, steps, stepDur, density, chaos, palette, repeat, kick, flt, events, fjumps, sjumps };
 }
 
 /* ── shared deterministic noise buffer (per context) ────────────── */
@@ -503,6 +520,76 @@ function scheduleFilterJump(master, j, t) {
     q.setValueAtTime(j.q, t);
     q.linearRampToValueAtTime(0.8, t + j.glide);
   }
+}
+
+/* ── spectral smear ───────────────────────────────────────────────
+   Fake-FFT smearing: the input is split into narrow ringing bandpass
+   bands, each feeding its own feedback delay and drifting across the
+   stereo field. Slow inharmonic LFOs wobble each band's delay time
+   (pitch/time smear); pattern-scheduled sjumps snap band frequency,
+   delay and feedback to new seeded values so the effect keeps
+   mutating. One instance sits on the pad bus, one on the drum bus. */
+const SMEAR_BANDS = 6;
+function buildSmear(ctx, seed) {
+  const rng = mulberry32(seed);
+  const input = ctx.createGain();
+  const out = ctx.createGain();
+  out.gain.value = 0.9;
+  const bands = [];
+  for (let i = 0; i < SMEAR_BANDS; i++) {
+    const f = 200 * Math.pow(5000 / 200, i / (SMEAR_BANDS - 1)) * rrange(rng, 0.85, 1.18);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = rrange(rng, 6, 14);
+    const dly = ctx.createDelay(2);
+    dly.delayTime.value = rrange(rng, 0.05, 0.45);
+    const fb = ctx.createGain();
+    fb.gain.value = rrange(rng, 0.35, 0.6);
+    const damp = ctx.createBiquadFilter();
+    damp.type = 'lowpass'; damp.frequency.value = 3500; damp.Q.value = 0.5;
+    const g = ctx.createGain();
+    g.gain.value = rrange(rng, 0.5, 0.9) / Math.sqrt(SMEAR_BANDS);
+    const pan = panNode(ctx, out, rrange(rng, -0.8, 0.8));
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = rrange(rng, 0.04, 0.3);
+    const lfoAmt = ctx.createGain();
+    lfoAmt.gain.value = dly.delayTime.value * rrange(rng, 0.15, 0.45);
+    lfo.connect(lfoAmt).connect(dly.delayTime);
+    lfo.start();
+    input.connect(bp).connect(dly);
+    dly.connect(fb).connect(damp).connect(dly);
+    dly.connect(g).connect(pan);
+    bands.push({ bp, dly, fb });
+  }
+  return { input, out, bands };
+}
+
+/* snap one band to a new seeded state at time t; the delay-time jump
+   warps whatever is ringing in the band — deliberate zipper glitch */
+function scheduleSmearJump(smear, j, t) {
+  const b = smear.bands[j.band % smear.bands.length];
+  b.bp.frequency.setValueAtTime(j.f, t);
+  b.dly.delayTime.setValueAtTime(j.dt, t);
+  b.fb.gain.setValueAtTime(j.fb, t);
+}
+
+/* voice buses: pad and drums each get a dry path to the master plus a
+   send into their own smear; smear returns re-enter at the tape stage
+   (with the reverb/delay tails) so the chaos filters don't chop them */
+function buildBuses(ctx, master) {
+  const drum = ctx.createGain();
+  const pad = ctx.createGain();
+  drum.connect(master.input);
+  pad.connect(master.input);
+  const drumSmear = buildSmear(ctx, 0xD7C223);
+  const padSmear = buildSmear(ctx, 0x5A3B11);
+  const dSend = ctx.createGain(); dSend.gain.value = 0.35;
+  const pSend = ctx.createGain(); pSend.gain.value = 0.6;
+  drum.connect(dSend).connect(drumSmear.input);
+  pad.connect(pSend).connect(padSmear.input);
+  drumSmear.out.connect(master.fxReturn);
+  padSmear.out.connect(master.fxReturn);
+  return { drum, pad, smear: { drum: drumSmear, pad: padSmear } };
 }
 
 /* ── fx buses: quadraverb-style reverb + tempo ping-pong delay ──── */
@@ -807,12 +894,15 @@ function scheduleEvent(ctx, dest, ev, when, fx) {
       sub.frequency.setValueAtTime(ev.f * 0.5, when);
       if (ev.f2) sub.frequency.exponentialRampToValueAtTime(ev.f2 * 0.5, when + ev.dur * 0.9);
       const subG = ctx.createGain();
-      subG.gain.value = 0.35;
-      // acid filter: opens on the pluck, sweeps shut over the note
+      subG.gain.value = 0.3;
+      // squelch filter: starts closed, snaps open, resonant sweep shut
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass'; lp.Q.value = ev.res;
-      lp.frequency.setValueAtTime(Math.min(12000, ev.cutoff * 2.5), when);
-      lp.frequency.exponentialRampToValueAtTime(Math.max(60, ev.cutoff * 0.5), when + ev.dur * 0.7);
+      const fPeak = Math.min(9000, ev.cutoff * 3.5);
+      const fFloor = Math.max(55, ev.f * 1.15);
+      lp.frequency.setValueAtTime(fFloor, when);
+      lp.frequency.exponentialRampToValueAtTime(fPeak, when + 0.012);
+      lp.frequency.exponentialRampToValueAtTime(fFloor, when + ev.dur * ev.envDecay);
       const g = ctx.createGain();
       env(g.gain, when, ev.g, ev.dur, 0.004);
       o.connect(lp);
@@ -996,6 +1086,7 @@ function ensureCtx() {
   if (state.ctx) state.ctx.close();
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: state.sampleRate });
   const master = buildMaster(ctx, masterSettings());
+  const buses = buildBuses(ctx, master);
   const fx = buildFx(ctx, master.fxReturn);
   if (state.pattern) setFxTimes(fx, state.pattern.stepDur);
   const analyser = ctx.createAnalyser();
@@ -1003,7 +1094,7 @@ function ensureCtx() {
   analyser.smoothingTimeConstant = 0.55;
   master.out.connect(analyser);
   analyser.connect(ctx.destination);
-  state.ctx = ctx; state.master = master; state.fx = fx; state.analyser = analyser;
+  state.ctx = ctx; state.master = master; state.buses = buses; state.fx = fx; state.analyser = analyser;
   return ctx;
 }
 
@@ -1054,6 +1145,12 @@ function doGenerate(newSeed) {
     fmap.get(j.step).push(j);
   }
   state.fltMap = fmap;
+  const smap = new Map();
+  for (const j of state.pattern.sjumps) {
+    if (!smap.has(j.step)) smap.set(j.step, []);
+    smap.get(j.step).push(j);
+  }
+  state.smearMap = smap;
   if (state.fx) setFxTimes(state.fx, state.pattern.stepDur);
   state.nextStep = 0;
 
@@ -1082,7 +1179,10 @@ function schedulerTick() {
       for (const ev of evs) {
         const mev = applyVoiceMods(ev);
         const when = state.nextTime + ((mev.frac || 0) + mev.jit) * pat.stepDur;
-        scheduleEvent(ctx, state.master.input, mev, Math.max(when, ctx.currentTime + 0.001), fxSends);
+        const dest = mev.type === 'pad' ? state.buses.pad
+                   : mev.type === 'bass' ? state.master.input
+                   : state.buses.drum;
+        scheduleEvent(ctx, dest, mev, Math.max(when, ctx.currentTime + 0.001), fxSends);
         state.flashQueue.push({ time: when, type: mev.type, pan: mev.pan });
         logLine(fmtEvent(mev), 'ev');
       }
@@ -1091,6 +1191,11 @@ function schedulerTick() {
     if (js) {
       for (const j of js)
         scheduleFilterJump(state.master, j, Math.max(state.nextTime + j.frac * pat.stepDur, ctx.currentTime + 0.001));
+    }
+    const sj = state.smearMap.get(state.nextStep);
+    if (sj) {
+      for (const j of sj)
+        scheduleSmearJump(state.buses.smear[j.bus], j, Math.max(state.nextTime + j.frac * pat.stepDur, ctx.currentTime + 0.001));
     }
     state.flashQueue.push({ time: state.nextTime, type: '_step', step: state.nextStep });
     state.nextTime += pat.stepDur;
@@ -1153,6 +1258,7 @@ async function exportWav() {
     const octx = new OfflineAudioContext(2, Math.ceil(dur * sr), sr);
     const master = buildMaster(octx, masterSettings());
     master.out.connect(octx.destination);
+    const buses = buildBuses(octx, master);
     const fx = buildFx(octx, master.fxReturn);
     setFxTimes(fx, pat.stepDur);
     const fxSends = {
@@ -1163,10 +1269,15 @@ async function exportWav() {
     for (const ev of pat.events) {
       const mev = applyVoiceMods(ev);
       const when = 0.05 + (mev.step + (mev.frac || 0) + mev.jit) * pat.stepDur;
-      scheduleEvent(octx, master.input, mev, Math.max(when, 0), fxSends);
+      const dest = mev.type === 'pad' ? buses.pad
+                 : mev.type === 'bass' ? master.input
+                 : buses.drum;
+      scheduleEvent(octx, dest, mev, Math.max(when, 0), fxSends);
     }
     for (const j of pat.fjumps)
       scheduleFilterJump(master, j, Math.max(0.05 + (j.step + j.frac) * pat.stepDur, 0));
+    for (const j of pat.sjumps)
+      scheduleSmearJump(buses.smear[j.bus], j, Math.max(0.05 + (j.step + j.frac) * pat.stepDur, 0));
     const rendered = await octx.startRendering();
     const blob = encodeWav(rendered);
     const name = `6117ch3r_${state.seed.toString(16).toUpperCase()}_${pat.bpm}bpm_${sr / 1000}k.wav`;

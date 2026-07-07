@@ -30,7 +30,7 @@ by four palettes:
 | DENSITY | event probability per step |
 | CHAOS | timing jitter, ratchets, param extremes, doubled hits |
 | K3Y / M0D3 | tonal center for bass + pads: 12 keys × 8 modes (the 7 church modes + harmonic minor) |
-| B4SSL1N3 | acid-style bassline generator — scale-degree walk (root-heavy) with resonant filter plucks, sub-octave layer, and occasional slides; always in key, never beat-repeated |
+| B4SSL1N3 | squelchy acid bassline generator — scale-degree walk (root-heavy) of long sawtooth notes (2–4.5 steps) through a high-resonance lowpass that snaps open and squelches shut, sub-octave layer, occasional slides; always in key, never beat-repeated |
 | P4D | pad generator — tertian chord stacks (triad + optional 7th/9th) from the mode, detuned dual oscillators per note, slow attack, heavy reverb send |
 | B34T R3P34T | beat-repeat amount: slices of the pattern get echoed forward as plain repeats, pitched (rising/diving) repeats, or halving-length rolls |
 | K1CK | kick-drum amount — pitch-drop sine kicks on the quarter-note grid (never jittered, never beat-repeated) to keep the pulse legible |
@@ -46,6 +46,17 @@ by four palettes:
 | EXPORT WAV | offline-renders the sequence to stereo 16-bit PCM WAV |
 
 Keyboard: `SPACE` play/stop · `G` generate · `E` export.
+
+## Spectral smear
+
+Two always-on spectral smearing units sit on dedicated buses — one on
+the pads, one on the drum/percussion bus. Each splits its input into
+six narrow ringing bandpass bands feeding modulated feedback delays,
+panned across the field; slow inharmonic LFOs wobble each band's delay
+time (pitch/time smear), and seeded pattern-locked jumps snap band
+frequency, delay time and feedback to new values as the sequence runs.
+Smear returns re-enter the master inside the safety stages, and all
+jumps come from the pattern seed, so exports match playback.
 
 ## Audio safety
 
