@@ -397,41 +397,23 @@ function getCrushCurve(levels) {
 }
 
 /* ── master chain ─────────────────────────────────────────────────
-   input → drive → chaos LPF (stereo pair) → glue comp → tape sat →
-   hi-shelf → safety comp → clip
-   FX returns re-enter at the glue comp, skipping drive and the
-   jumping filters so tails stay smooth. The last two stages are
-   fixed and guarantee output never exceeds full scale. */
-/* post gains track pre closely (exp ~0.75–0.8) so adding drive/sat adds
-   character, not loudness */
-function driveGains(drive01) {
-  const pre = 1 + drive01 * 8;
-  return { pre, post: 1 / Math.pow(pre, 0.8) };
-}
+   input → chaos LPF (stereo pair) → tape sat → hi-shelf →
+   safety comp → clip → master volume
+   FX returns re-enter at the tape stage, skipping the jumping
+   filters so tails stay smooth. The comp/clip stages are fixed and
+   guarantee output never exceeds full scale. */
+/* post gain tracks pre closely so adding saturation adds character,
+   not loudness */
 function tapeGains(tape01) {
   const pre = 1 + tape01 * 2.5;
   return { pre, post: 1 / Math.pow(pre, 0.75) };
 }
-function glueSettings(glue01) {
-  return { threshold: -2 - glue01 * 14, makeup: 1 + glue01 * 0.3 };
-}
 const SHELF_FREQ = 4500;
 const tapeLPFreq = (tape01) => 13000 - tape01 * 6000; // head rolloff 13k→7k
 
-function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGain: 1, vol: 0.9 }) {
-  // BUS GAIN: pre-master trim — drives the whole chain harder or softer
+function buildMaster(ctx, ms = { shelfCut: 0, tape: 0, vol: 0.9 }) {
   const input = ctx.createGain();
-  input.gain.value = 0.65 * ms.busGain;
-
-  // DRIVE: variable pre-gain into a fixed tanh stage, level-compensated.
-  const dg = driveGains(ms.drive);
-  const preDrive = ctx.createGain();
-  preDrive.gain.value = dg.pre;
-  const driveShaper = ctx.createWaveShaper();
-  driveShaper.curve = getDriveCurve(2);
-  driveShaper.oversample = '2x';
-  const postDrive = ctx.createGain();
-  postDrive.gain.value = dg.post;
+  input.gain.value = 0.8;
 
   // CHAOS LPF: independent resonant lowpass per channel; cutoffs rest
   // wide open and get yanked around by pattern-scheduled jumps
@@ -444,17 +426,6 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGai
     f.Q.value = 0.8;
   }
   const merge = ctx.createChannelMerger(2);
-
-  // GLUE: musical bus compressor (amount = threshold depth + makeup)
-  const gs = glueSettings(ms.glue);
-  const busComp = ctx.createDynamicsCompressor();
-  busComp.threshold.value = gs.threshold;
-  busComp.knee.value = 9;
-  busComp.ratio.value = 3;
-  busComp.attack.value = 0.01;
-  busComp.release.value = 0.15;
-  const makeup = ctx.createGain();
-  makeup.gain.value = gs.makeup;
 
   // TAPE: gentle tanh saturation + high rolloff, level-compensated
   const tg = tapeGains(ms.tape);
@@ -502,17 +473,16 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGai
   const out = ctx.createGain();
   out.gain.value = Math.min(1, 0.95 * ms.vol);
 
-  input.connect(preDrive).connect(driveShaper).connect(postDrive).connect(split);
+  input.connect(split);
   split.connect(lpfL, 0);
   split.connect(lpfR, 1);
   lpfL.connect(merge, 0, 0);
   lpfR.connect(merge, 0, 1);
-  merge.connect(busComp).connect(makeup)
-       .connect(preTape).connect(tapeShaper).connect(postTape).connect(tapeLP)
+  merge.connect(preTape).connect(tapeShaper).connect(postTape).connect(tapeLP)
        .connect(shelf)
        .connect(comp).connect(clip).connect(out);
-  return { input, out, preDrive, postDrive, lpfL, lpfR, fxReturn: busComp,
-           busComp, makeup, preTape, postTape, tapeLP, shelf };
+  return { input, out, lpfL, lpfR, fxReturn: preTape,
+           preTape, postTape, tapeLP, shelf };
 }
 
 /* yank a chaos filter at time t; snap = instant cut + glide open,
@@ -1000,16 +970,11 @@ function applyVoiceMods(ev) {
   return c;
 }
 
-/* sliders are rescaled so useful settings sit low on the dial:
-   drive 20 ≡ ×0.5, glue 50 ≡ ×1, busgain 15% ≡ ×0.9, vol 40% ≡ ×0.8 */
 function masterSettings() {
   return {
-    drive: parseInt($('drive').value, 10) / 100 * 2.5,
     shelfCut: parseInt($('shelf').value, 10),
     tape: parseInt($('tape').value, 10) / 100,
-    glue: parseInt($('glue').value, 10) / 100 * 2,
-    busGain: parseInt($('busgain').value, 10) / 100 * 6,
-    vol: parseInt($('vol').value, 10) / 100 * 2,
+    vol: parseInt($('vol').value, 10) / 100 * 2, // 40% ≡ ×0.8
   };
 }
 
@@ -1018,14 +983,7 @@ function applyMasterLive() {
   const m = state.master;
   if (!m) return;
   const ms = masterSettings();
-  m.input.gain.value = 0.65 * ms.busGain;
   m.out.gain.value = Math.min(1, 0.95 * ms.vol);
-  const dg = driveGains(ms.drive);
-  m.preDrive.gain.value = dg.pre;
-  m.postDrive.gain.value = dg.post;
-  const gs = glueSettings(ms.glue);
-  m.busComp.threshold.value = gs.threshold;
-  m.makeup.gain.value = gs.makeup;
   const tg = tapeGains(ms.tape);
   m.preTape.gain.value = tg.pre;
   m.postTape.gain.value = tg.post;
@@ -1495,9 +1453,8 @@ function bindUi() {
   $('vreset').addEventListener('click', resetVoices);
 
   // master-bus controls are live: no regen, just retune the chain
-  for (const [id, valId] of [['drive', 'driveVal'], ['shelf', 'shelfVal'],
-                             ['tape', 'tapeVal'], ['glue', 'glueVal'],
-                             ['busgain', 'busgainVal'], ['vol', 'volVal']]) {
+  for (const [id, valId] of [['shelf', 'shelfVal'], ['tape', 'tapeVal'],
+                             ['vol', 'volVal']]) {
     $(id).addEventListener('input', () => {
       $(valId).textContent = $(id).value;
       applyMasterLive();

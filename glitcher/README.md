@@ -33,15 +33,12 @@ by four palettes:
 | B4SSL1N3 | acid-style bassline generator — scale-degree walk (root-heavy) with resonant filter plucks, sub-octave layer, and occasional slides; always in key, never beat-repeated |
 | P4D | pad generator — tertian chord stacks (triad + optional 7th/9th) from the mode, detuned dual oscillators per note, slow attack, heavy reverb send |
 | B34T R3P34T | beat-repeat amount: slices of the pattern get echoed forward as plain repeats, pitched (rising/diving) repeats, or halving-length rolls |
-| DR1V3 | master-bus distortion (level-compensated tanh stage, pre-limiter; live control, also baked into exports) |
 | K1CK | kick-drum amount — pitch-drop sine kicks on the quarter-note grid (never jittered, never beat-repeated) to keep the pulse legible |
 | 3V0LV3 ∞ | reseeds and regenerates the pattern at every loop boundary — endless mutation |
 | V01C3 M4TR1X | per-voice LVL (level ×0–2), PIT (pitch ×0.25–4), DEC (decay/time ×0.25–4), WGT (probability weight ×0–3) for all 16 voices; LVL/PIT/DEC apply instantly, WGT regenerates; double-click any slider to reset |
 | F1LT3R CH40S | stereo pair of resonant lowpass filters on the master bus; seeded jumps locked to pattern-event positions yank each channel's cutoff (120 Hz–9 kHz, Q 3–16) then glide it back open — snap cuts and dive-sweeps, L/R/both |
 | R3V3RB S3ND | random per-event sends to a dark digital reverb (2.8 s damped noise-tail convolution — HF decays faster than lows, lowpassed return) |
 | P1NG-P0NG S3ND | random per-event sends to a tempo-synced ping-pong delay (dotted-eighth hops, hard-panned, dark filtered cross-feedback) |
-| BUS G41N | pre-master trim (defaults 15%, dial rescaled so there's lots of push above it) — drives the whole mastering chain harder or softer; interacts with drive/comp/sat |
-| BUS C0MP | master glue compressor (3:1, 10 ms/150 ms) — amount deepens threshold −2→−30 dB with gentle auto makeup |
 | T4P3 S4T | tape saturation — gentle compensated tanh plus head-rolloff lowpass (13 kHz→7 kHz) |
 | H1-SH3LF CUT | high-shelf at 4.5 kHz, 0 to −24 dB — tames the harsh top end |
 | M4ST3R V0L | output level after the entire mastering chain (post-limiter, defaults 40%) — scales volume without changing the tone; capped at unity so output still can't exceed full scale |
@@ -52,13 +49,14 @@ Keyboard: `SPACE` play/stop · `G` generate · `E` export.
 
 ## Audio safety
 
-Master chain: gain → drive (compensated tanh) → chaos LPF pair (L/R) →
-glue compressor (3:1) → tape saturation (compensated tanh + rolloff) →
-high shelf → safety compressor (20:1, −6 dB threshold, 2 ms attack) →
+Master chain: gain → chaos LPF pair (L/R) →
+tape saturation (compensated tanh + rolloff) → high shelf →
+safety compressor (20:1, −6 dB threshold, 2 ms attack) →
 unity-gain tanh soft-clip (soft ceiling ≈ 0.7) → brickwall clamp at
-±0.97 (≈ −0.26 dBFS), 4× oversampled. Drive and saturation stages are
-loudness-compensated so adding them changes character, not level.
-Reverb and delay returns re-enter at the glue compressor — inside the
+±0.97 (≈ −0.26 dBFS), 4× oversampled → master volume (capped at unity).
+The saturation stage is loudness-compensated so adding it changes
+character, not level.
+Reverb and delay returns re-enter at the tape stage — inside the
 safety stages, so no setting can push the output past full scale.
 Nothing reaching your ears or the WAV file can exceed full scale.
 
