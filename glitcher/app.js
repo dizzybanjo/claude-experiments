@@ -494,9 +494,10 @@ function buildMaster(ctx, ms = { drive: 0, shelfCut: 0, tape: 0, glue: 0, busGai
   clip.oversample = '4x';
 
   // MASTER VOLUME: post-mastering-bus level — after the limiter/clipper,
-  // so it only scales the final output and never changes the chain's tone
+  // so it only scales the final output and never changes the chain's tone.
+  // Capped at unity so the full-scale guarantee survives the rescaled dial.
   const out = ctx.createGain();
-  out.gain.value = 0.95 * ms.vol;
+  out.gain.value = Math.min(1, 0.95 * ms.vol);
 
   input.connect(preDrive).connect(driveShaper).connect(postDrive).connect(split);
   split.connect(lpfL, 0);
@@ -996,14 +997,16 @@ function applyVoiceMods(ev) {
   return c;
 }
 
+/* sliders are rescaled so useful settings sit low on the dial:
+   drive 20 ≡ ×0.5, glue 50 ≡ ×1, busgain 15% ≡ ×0.9, vol 40% ≡ ×0.8 */
 function masterSettings() {
   return {
-    drive: parseInt($('drive').value, 10) / 100,
+    drive: parseInt($('drive').value, 10) / 100 * 2.5,
     shelfCut: parseInt($('shelf').value, 10),
     tape: parseInt($('tape').value, 10) / 100,
-    glue: parseInt($('glue').value, 10) / 100,
-    busGain: parseInt($('busgain').value, 10) / 100,
-    vol: parseInt($('vol').value, 10) / 100,
+    glue: parseInt($('glue').value, 10) / 100 * 2,
+    busGain: parseInt($('busgain').value, 10) / 100 * 6,
+    vol: parseInt($('vol').value, 10) / 100 * 2,
   };
 }
 
@@ -1013,7 +1016,7 @@ function applyMasterLive() {
   if (!m) return;
   const ms = masterSettings();
   m.input.gain.value = 0.8 * ms.busGain;
-  m.out.gain.value = 0.95 * ms.vol;
+  m.out.gain.value = Math.min(1, 0.95 * ms.vol);
   const dg = driveGains(ms.drive);
   m.preDrive.gain.value = dg.pre;
   m.postDrive.gain.value = dg.post;
