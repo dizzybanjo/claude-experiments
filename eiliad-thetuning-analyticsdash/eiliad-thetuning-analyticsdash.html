@@ -398,7 +398,7 @@
       <label>Min engagement (mins)</label>
       <input type="number" id="filter-min-engagement" min="0" step="1" value="5">
     </div>
-    <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes">Min Engagement</button>
+    <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never reached chapter 1">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
@@ -872,20 +872,26 @@ function getExcludedUsers() {
   const cohortAfter = document.getElementById('filter-cohort-after').value;
   const excluded = new Set(specificExclUsers);
 
-  // Exclude users whose total app engagement is below the minimum minutes
+  // Exclude users whose total app engagement is below the minimum minutes,
+  // or who never reached chapter 1
   engagementExcludedCount = 0;
   if (filterMinEngagement) {
     const thresh = parseFloat(document.getElementById('filter-min-engagement').value);
-    if (!isNaN(thresh) && thresh > 0) {
-      const totals = computeUserEngagementMins(rawData);
-      const allUsers = new Set(rawData.map(r => r[cols.user]).filter(Boolean));
-      allUsers.forEach(u => {
-        if ((totals[u] || 0) < thresh && !excluded.has(u)) {
-          excluded.add(u);
-          engagementExcludedCount++;
-        }
-      });
-    }
+    const totals = computeUserEngagementMins(rawData);
+    const chapter1Users = new Set();
+    rawData.forEach(r => {
+      if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
+      const m = (r[cols.entity] || '').match(/(\d+)/);
+      if (m && parseInt(m[1], 10) === 1) chapter1Users.add(r[cols.user]);
+    });
+    const allUsers = new Set(rawData.map(r => r[cols.user]).filter(Boolean));
+    allUsers.forEach(u => {
+      const belowMins = !isNaN(thresh) && thresh > 0 && (totals[u] || 0) < thresh;
+      if ((belowMins || !chapter1Users.has(u)) && !excluded.has(u)) {
+        excluded.add(u);
+        engagementExcludedCount++;
+      }
+    });
   }
 
   if (!exclFrom && !exclTo && !cohortAfter) return excluded;
