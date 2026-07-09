@@ -99,6 +99,8 @@
     .btn-cheat.active { box-shadow: 0 0 20px #f87171bb; outline: 2px solid #f87171; outline-offset: 2px; }
     .btn-quality { background: linear-gradient(135deg, #34d399, #059669); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #34d39944; }
     .btn-quality.active { box-shadow: 0 0 20px #34d399bb; outline: 2px solid #34d399; outline-offset: 2px; }
+    .btn-engage { background: linear-gradient(135deg, #60a5fa, #2563eb); color: #fff; border: none; letter-spacing: 0.5px; font-weight: 700; text-transform: uppercase; font-size: 12px; box-shadow: 0 0 12px #60a5fa44; }
+    .btn-engage.active { box-shadow: 0 0 20px #60a5fabb; outline: 2px solid #60a5fa; outline-offset: 2px; }
 
     .field-group label {
       display: block;
@@ -392,6 +394,11 @@
       <label>Registered after</label>
       <input type="datetime-local" id="filter-cohort-after">
     </div>
+    <div class="field-group" style="max-width:170px; flex:0 1 170px;">
+      <label>Min engagement (mins)</label>
+      <input type="number" id="filter-min-engagement" min="0" step="1" value="2">
+    </div>
+    <button class="btn btn-engage" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
@@ -659,6 +666,8 @@ let filterAlpha = false;
 let filterCheatDev = true;
 let detectedCheats = new Set();
 let filterQualitySessions = true;
+let filterMinEngagement = false;
+let engagementExcludedCount = 0;
 
 const cols = {
   user:      'User ID',
@@ -862,6 +871,23 @@ function getExcludedUsers() {
   const exclTo      = document.getElementById('filter-excl-to').value;
   const cohortAfter = document.getElementById('filter-cohort-after').value;
   const excluded = new Set(specificExclUsers);
+
+  // Exclude users whose total app engagement is below the minimum minutes
+  engagementExcludedCount = 0;
+  if (filterMinEngagement) {
+    const thresh = parseFloat(document.getElementById('filter-min-engagement').value);
+    if (!isNaN(thresh) && thresh > 0) {
+      const totals = computeUserEngagementMins(rawData);
+      const allUsers = new Set(rawData.map(r => r[cols.user]).filter(Boolean));
+      allUsers.forEach(u => {
+        if ((totals[u] || 0) < thresh && !excluded.has(u)) {
+          excluded.add(u);
+          engagementExcludedCount++;
+        }
+      });
+    }
+  }
+
   if (!exclFrom && !exclTo && !cohortAfter) return excluded;
   rawData.forEach(r => {
     const user = r[cols.user];
@@ -973,6 +999,9 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   renderExclTags();
   filterAlpha = false;
   document.getElementById('filter-alpha-btn').classList.remove('active');
+  filterMinEngagement = false;
+  document.getElementById('filter-engagement-btn').classList.remove('active');
+  document.getElementById('filter-min-engagement').value = '2';
   applyFilters();
 });
 
@@ -1043,12 +1072,31 @@ document.getElementById('filter-quality-btn').addEventListener('click', () => {
   applyFilters();
 });
 
+function updateEngagementBtn() {
+  const btn = document.getElementById('filter-engagement-btn');
+  if (!btn) return;
+  btn.textContent = filterMinEngagement && engagementExcludedCount > 0
+    ? `Min Engagement (${engagementExcludedCount})`
+    : 'Min Engagement';
+}
+
+document.getElementById('filter-engagement-btn').addEventListener('click', () => {
+  filterMinEngagement = !filterMinEngagement;
+  document.getElementById('filter-engagement-btn').classList.toggle('active', filterMinEngagement);
+  applyFilters();
+});
+
+document.getElementById('filter-min-engagement').addEventListener('change', () => {
+  if (filterMinEngagement) applyFilters();
+});
+
 function applyFilters() {
   // Always recompute detected cheats from the full raw dataset
   detectedCheats = detectCheatUsers(rawData);
   updateCheatBtn();
 
   const excludedUsers = getExcludedUsers();
+  updateEngagementBtn();
   updateUserDropdown(excludedUsers);
 
   const from       = document.getElementById('filter-from').value;
@@ -1908,7 +1956,7 @@ function median(arr) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function buildAppSessions(data) {
+function buildAppSessions(data, applyQualityFilter = filterQualitySessions) {
   const bySession = {};
   data.forEach(r => {
     if ((r[cols.type] || '').toLowerCase() !== 'app') return;
@@ -1934,10 +1982,19 @@ function buildAppSessions(data) {
     if (s.lastSeen && s.lastSeen >= s.opened && !isValidEndForStart(s.opened, s.lastSeen)) return;
     const end = s.lastSeen && s.lastSeen >= s.opened ? s.lastSeen : s.opened;
     const length = (end - s.opened) / 60000;
-    if (filterQualitySessions && length < 1) return;
+    if (applyQualityFilter && length < 1) return;
     sessions.push({ user: s.user, start: s.opened, end, length });
   });
   return sessions;
+}
+
+// Total app engagement minutes per user, independent of the quality-session toggle
+function computeUserEngagementMins(data) {
+  const totals = {};
+  buildAppSessions(data, false).forEach(s => {
+    totals[s.user] = (totals[s.user] || 0) + s.length;
+  });
+  return totals;
 }
 
 // ---- session charts ----
