@@ -402,6 +402,14 @@
       <label title="Deep Listening is the default patch, so short periods are just the app handing off between activities. Staying in it beyond this counts as deliberate passive practice.">Min deep listen (secs)</label>
       <input type="number" id="filter-ambient-min" min="0" step="1" value="5">
     </div>
+    <div class="field-group" style="max-width:190px; flex:0 1 190px;">
+      <label title="Drives the TOTAL TIME SPENT chart only. Sessions longer than this are dropped, guarding against a start pairing with a much later finish when an end event goes missing — but every dropped session is real time removed from the total. Set 0 for no cap.">Max session — total (mins)</label>
+      <input type="number" id="filter-max-duration" min="0" step="1" value="360" placeholder="0 = no cap">
+    </div>
+    <div class="field-group" style="max-width:200px; flex:0 1 200px;">
+      <label title="Drives the AVERAGE SESSION DURATION and MEDIAN SESSION DURATION charts. Sessions longer than this are dropped. Default 360 (6h) keeps genuine long nature walks and deep listens, while excluding the 11-18h pairs left behind by missing end events. Set 0 for no cap.">Max session — average (mins)</label>
+      <input type="number" id="filter-max-duration-avg" min="0" step="1" value="360" placeholder="0 = no cap">
+    </div>
     <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never reached chapter 1">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
@@ -501,8 +509,18 @@
         </div>
         <div class="chart-card">
           <h3>Average Session Duration</h3>
-          <p class="sub">Mean time from start to finish per activity (minutes)</p>
+          <p class="sub">Mean time from start to finish per activity (minutes). Long sessions dropped per the max session — average filter</p>
           <div class="chart-wrap"><canvas id="chart-duration"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Median Session Duration</h3>
+          <p class="sub">Typical session per activity — unmoved by a few very long ones, so read it against the average to see the skew. Uses the max session — average filter</p>
+          <div class="chart-wrap"><canvas id="chart-duration-median"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Total Time Spent</h3>
+          <p class="sub">Summed time across every paired session per activity — where the hours actually go. Long sessions dropped per the max session — total filter</p>
+          <div class="chart-wrap"><canvas id="chart-total-time"></canvas></div>
         </div>
         <div class="chart-card" style="grid-column: 1 / -1;">
           <h3>Resonance Improvement Over Time</h3>
@@ -611,6 +629,11 @@
         <span class="section-tags">derived from app opened / last seen events</span>
       </div>
       <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Total Time In App</h3>
+          <p class="sub">Every app session in the filtered cohort, summed across the whole period</p>
+          <div class="chart-wrap"><canvas id="chart-total-app-time"></canvas></div>
+        </div>
         <div class="chart-card">
           <h3>Average Session Length</h3>
           <p class="sub">Mean session duration across all users in the selection (minutes)</p>
@@ -1040,6 +1063,8 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   document.getElementById('filter-engagement-btn').classList.add('active');
   document.getElementById('filter-min-engagement').value = '5';
   document.getElementById('filter-ambient-min').value = String(AMBIENT_MIN_LISTEN_DEFAULT);
+  document.getElementById('filter-max-duration').value = String(TOTAL_TIME_MAX_DEFAULT);
+  document.getElementById('filter-max-duration-avg').value = String(AVG_DURATION_MAX_DEFAULT);
   applyFilters();
 });
 
@@ -1129,6 +1154,8 @@ document.getElementById('filter-min-engagement').addEventListener('change', () =
 });
 
 document.getElementById('filter-ambient-min').addEventListener('change', applyFilters);
+document.getElementById('filter-max-duration').addEventListener('change', applyFilters);
+document.getElementById('filter-max-duration-avg').addEventListener('change', applyFilters);
 
 function applyFilters() {
   // Always recompute detected cheats from the full raw dataset
@@ -1180,6 +1207,8 @@ function applyFilters() {
   renderVoluntaryPractice();
   renderCompletionRate();
   renderAvgDuration();
+  renderMedianDuration();
+  renderTotalTime();
   renderActivityResonanceTrend();
   renderActivityTimeOfDay();
   // extras
@@ -1942,7 +1971,30 @@ function renderCompletionRate() {
     [PALETTE[0], PALETTE[1], PALETTE[2]], '% completed');
 }
 
-function buildDurationMap(events) {
+// maxMins caps how long a pair may be before it's discarded, guarding against a
+// start pairing with a much later finish when an end event goes missing.
+//
+// Both default to 360 (6h), set where the real sessions stop and the artifacts
+// start. Nature runs a smooth, gapless distribution out to ~5.6h — long walks,
+// gaining resonance as they go (+21, +37, +50) — and a 90 cap was throwing 15 of
+// them away. The artifacts sit well clear of that: Meditation has nothing at all
+// between 60min and 11h, then 4 sessions of 11-18.6h that gain ~1 resonance
+// point, which is a start pairing with a finish after a missing end event.
+// Uncapped, those 4 drag Meditation's mean to 128 min.
+const AVG_DURATION_MAX_DEFAULT = 360;
+const TOTAL_TIME_MAX_DEFAULT   = 360;
+
+function readMaxMins(id, fallback) {
+  const el = document.getElementById(id);
+  const v  = el ? parseFloat(el.value) : NaN;
+  if (isNaN(v)) return fallback;
+  return v <= 0 ? Infinity : v;   // 0 = no cap
+}
+
+const getMaxDurationMins    = () => readMaxMins('filter-max-duration', TOTAL_TIME_MAX_DEFAULT);
+const getMaxDurationMinsAvg = () => readMaxMins('filter-max-duration-avg', AVG_DURATION_MAX_DEFAULT);
+
+function buildDurationMap(events, maxMins) {
   const sessions = {};
   events.forEach(r => {
     const entity = r[cols.entity] || '';
@@ -1960,12 +2012,11 @@ function buildDurationMap(events) {
     starts.sort((a,b) => a.dt - b.dt);
     ends.sort((a,b) => a.dt - b.dt);
     const usedEnds = new Set();
-    const MAX_DURATION_MINS = 90;
     starts.forEach(start => {
       const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
       if (match) {
         const mins = (match.dt - start.dt) / 60000;
-        if (mins > MAX_DURATION_MINS) return;
+        if (mins > maxMins) return;
         usedEnds.add(match);
         if (!dMap[entity]) dMap[entity] = [];
         dMap[entity].push(mins);
@@ -1980,7 +2031,7 @@ function renderAvgDuration() {
     (r[cols.type]||'').toLowerCase().includes('task') &&
     ACTIVITIES.some(a => (r[cols.entity]||'').toLowerCase().includes(a))
   );
-  const dMap   = buildDurationMap(taskEvts);
+  const dMap   = buildDurationMap(taskEvts, getMaxDurationMinsAvg());
   const labels = ACTIVITIES.filter(a => {
     const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
     return key && dMap[key].length > 0;
@@ -1991,6 +2042,105 @@ function renderAvgDuration() {
     return +(arr.reduce((x,y) => x+y, 0) / arr.length).toFixed(2);
   });
   renderBarChart('chart-duration', labels.map(labelFor), data, [PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3]], 'Avg mins');
+}
+
+// Same pairing and cap as Average Session Duration, but the median — a long tail
+// of legitimate background sessions pulls the mean up while leaving this put, so
+// the gap between the two charts is the skew.
+function renderMedianDuration() {
+  const taskEvts = activityRows.filter(r =>
+    (r[cols.type]||'').toLowerCase().includes('task') &&
+    ACTIVITIES.some(a => (r[cols.entity]||'').toLowerCase().includes(a))
+  );
+  const dMap = buildDurationMap(taskEvts, getMaxDurationMinsAvg());
+
+  const labels = ACTIVITIES.filter(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    return key && dMap[key].length > 0;
+  });
+  if (!labels.length) { destroyChart('chart-duration-median'); return; }
+
+  const data = labels.map(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    const arr = [...dMap[key]].sort((x, y) => x - y);
+    const mid = Math.floor(arr.length / 2);
+    const med = arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+    return +med.toFixed(2);
+  });
+
+  renderBarChart('chart-duration-median', labels.map(labelFor), data,
+    [PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3]], 'Median mins');
+}
+
+// Same pairing as Average Session Duration, summed rather than averaged, so the
+// two charts reconcile (total ÷ session count = the average shown there).
+function renderTotalTime() {
+  const taskEvts = activityRows.filter(r =>
+    (r[cols.type]||'').toLowerCase().includes('task') &&
+    ACTIVITIES.some(a => (r[cols.entity]||'').toLowerCase().includes(a))
+  );
+  const dMap = buildDurationMap(taskEvts, getMaxDurationMins());
+
+  const present = ACTIVITIES.filter(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    return key && dMap[key].length > 0;
+  });
+  if (!present.length) { destroyChart('chart-total-time'); return; }
+
+  const totalsMins = present.map(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    return dMap[key].reduce((x, y) => x + y, 0);
+  });
+  const counts = present.map(a => {
+    const key = Object.keys(dMap).find(k => k.toLowerCase().includes(a));
+    return dMap[key].length;
+  });
+
+  const useHours = Math.max(...totalsMins) >= 120;
+  const data = totalsMins.map(m => +(useHours ? m / 60 : m).toFixed(1));
+
+  destroyChart('chart-total-time');
+  const ctx = document.getElementById('chart-total-time');
+  if (!ctx) return;
+
+  const bgColors = present.map((_, i) => PALETTE[i % PALETTE.length]);
+  charts['chart-total-time'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: present.map(labelFor),
+      datasets: [{
+        data,
+        backgroundColor: bgColors.map(c => c + 'cc'),
+        borderColor: bgColors,
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` ${fmtDuration(totalsMins[c.dataIndex])} across ${counts[c.dataIndex]} sessions`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: useHours ? 'Total hours' : 'Total mins', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
 }
 
 // ---- engagement metrics ----
@@ -2393,7 +2543,11 @@ function renderLineChart(canvasId, labels, data, color, yLabel) {
         tooltip: {
           backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
           titleColor: '#e2e8f0', bodyColor: '#94a3b8',
-          callbacks: { label: c => ` ${c.parsed.y} ${yLabel}` }
+          callbacks: {
+            label: c => isMinuteLabel(yLabel)
+              ? ` ${fmtMinsValue(c.parsed.y, yLabel)}`
+              : ` ${c.parsed.y} ${yLabel}`
+          }
         }
       },
       scales: {
@@ -2446,7 +2600,9 @@ function renderBarChart(canvasId, labels, data, colors, yLabel) {
           titleColor: '#e2e8f0',
           bodyColor: '#94a3b8',
           callbacks: {
-            label: ctx => ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`
+            label: ctx => isMinuteLabel(yLabel)
+              ? ` ${fmtMinsValue(ctx.parsed.y, yLabel)}`
+              : ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`
           }
         }
       },
@@ -2485,6 +2641,22 @@ function destroyChart(id) {
 }
 
 // ---- utils ----
+// Durations are carried around in minutes, but read badly past an hour — show
+// hours once they get there.
+function isMinuteLabel(yLabel) {
+  return /\bmins?\b/i.test(yLabel || '');
+}
+
+function fmtMinsValue(mins, yLabel) {
+  if (mins >= 60) return `${(mins / 60).toFixed(1)} ${(yLabel || 'mins').replace(/\bmins?\b/i, 'hours')}`;
+  return `${mins.toLocaleString()} ${yLabel || 'mins'}`;
+}
+
+// Standalone durations with no axis label to borrow wording from.
+function fmtDuration(mins) {
+  return mins >= 60 ? `${(mins / 60).toFixed(1)} hours` : `${mins.toFixed(0)} mins`;
+}
+
 function parseDate(val) {
   if (!val) return null;
   const d = new Date(val);
@@ -2559,9 +2731,64 @@ function computeUserEngagementMins(data) {
 }
 
 // ---- session charts ----
+// One figure for the whole period: every app session in the cohort, summed.
+// Built from the same opened/last-seen pairs as the rest of the Sessions
+// section, so the Quality Sessions toggle applies here too.
+function renderTotalAppTime() {
+  const totalMins = sessionData.reduce((a, s) => a + s.length, 0);
+  const users     = new Set(sessionData.map(s => s.user)).size;
+  const useHours  = totalMins >= 120;
+  const value     = +(useHours ? totalMins / 60 : totalMins).toFixed(1);
+
+  destroyChart('chart-total-app-time');
+  const ctx = document.getElementById('chart-total-app-time');
+  if (!ctx) return;
+
+  charts['chart-total-app-time'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['All Users'],
+      datasets: [{
+        data: [value],
+        backgroundColor: PALETTE[0] + 'cc',
+        borderColor: PALETTE[0],
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+        maxBarThickness: 120,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            label: () => ` ${fmtDuration(totalMins)} · ${sessionData.length} sessions · ${users} users`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: useHours ? 'Total hours' : 'Total mins', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
 function renderSessionCharts() {
-  const SESSION_CHART_IDS = ['chart-session-length-avg','chart-session-length-user','chart-session-length-time','chart-session-length-median','chart-session-freq','chart-sessions-per-week'];
+  const SESSION_CHART_IDS = ['chart-total-app-time','chart-session-length-avg','chart-session-length-user','chart-session-length-time','chart-session-length-median','chart-session-freq','chart-sessions-per-week'];
   if (!sessionData.length) { SESSION_CHART_IDS.forEach(id => destroyChart(id)); return; }
+
+  renderTotalAppTime();
 
   // Average session length across all users
   const overallAvg = sessionData.reduce((a, s) => a + s.length, 0) / sessionData.length;
