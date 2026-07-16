@@ -486,6 +486,11 @@
           <div class="chart-wrap"><canvas id="chart-act-resonance"></canvas></div>
         </div>
         <div class="chart-card">
+          <h3>Voluntary Practice</h3>
+          <p class="sub">Sessions started when the user already met the next chapter's resonance gate — practice that unlocks nothing</p>
+          <div class="chart-wrap"><canvas id="chart-voluntary-practice"></canvas></div>
+        </div>
+        <div class="chart-card">
           <h3>Completion Rate</h3>
           <p class="sub">% of started sessions that reached a finished event</p>
           <div class="chart-wrap"><canvas id="chart-completion"></canvas></div>
@@ -1150,6 +1155,7 @@ function applyFilters() {
   // activities
   renderGroupCharts(ACTIVITIES, 'chart-act-volume', 'chart-act-resonance',
     [PALETTE[0], PALETTE[1], PALETTE[2]]);
+  renderVoluntaryPractice();
   renderCompletionRate();
   renderAvgDuration();
   renderActivityResonanceTrend();
@@ -1585,6 +1591,141 @@ function renderChapterResonanceSurplus() {
 }
 
 // ---- activity metrics ----
+// Practice that unlocks nothing. At each activity start we compare the user's
+// resonance to the gate on the next chapter above the highest one they've
+// entered. If they already clear it, the session buys them no progression.
+// Counted as voluntary when: resonance is at the 100 cap (nothing left to gain),
+// the next chapter has no resonance gate at all, or resonance already meets it.
+function renderVoluntaryPractice() {
+  const RES_CAP = 100;
+
+  const resReq = {};
+  STATE_CONDITIONS.forEach(sc => {
+    if (sc && sc.conditions && typeof sc.conditions.resonance === 'number') {
+      resReq[sc.toEnterState] = sc.conditions.resonance;
+    }
+  });
+  const maxState = STATE_CONDITIONS.reduce((m, sc) => sc && sc.toEnterState > m ? sc.toEnterState : m, 0);
+
+  // Chapter entries per user, time-ordered, so we can ask "where were they at time T".
+  const entriesByUser = {};
+  filteredData.forEach(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
+    const user = r[cols.user];
+    const m    = (r[cols.entity] || '').match(/(\d+)/);
+    const dt   = parseDate(r[cols.datetime]);
+    if (!user || !m || !dt) return;
+    (entriesByUser[user] = entriesByUser[user] || []).push({ dt, ch: parseInt(m[1], 10) });
+  });
+  Object.values(entriesByUser).forEach(list => list.sort((a, b) => a.dt - b.dt));
+
+  const taskStarts = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task') && isStartAction(r[cols.action] || '')
+  );
+
+  const stats = {};   // entity -> { voluntary, instrumental }
+  const voluntaryUsers = new Set();
+  taskStarts.forEach(r => {
+    const user   = r[cols.user];
+    const entity = (r[cols.entity] || '').toLowerCase();
+    const res    = parseFloat(r[cols.resonance]);
+    const dt     = parseDate(r[cols.datetime]);
+    if (!user || !entity || isNaN(res) || !dt) return;
+
+    // Highest chapter entered at or before this moment.
+    let current = 0;
+    (entriesByUser[user] || []).forEach(e => {
+      if (e.dt <= dt && e.ch > current) current = e.ch;
+    });
+
+    const next = current + 1;
+    let voluntary;
+    if (res >= RES_CAP)          voluntary = true;   // capped, nothing to gain
+    else if (next > maxState)    voluntary = true;   // finished the story
+    else if (!(next in resReq))  voluntary = true;   // next chapter has no resonance gate
+    else                         voluntary = res >= resReq[next];
+
+    if (!stats[entity]) stats[entity] = { voluntary: 0, instrumental: 0 };
+    stats[entity][voluntary ? 'voluntary' : 'instrumental']++;
+    if (voluntary) voluntaryUsers.add(user);
+  });
+
+  const labels = Object.keys(stats).sort((a, b) =>
+    (stats[b].voluntary + stats[b].instrumental) - (stats[a].voluntary + stats[a].instrumental)
+  );
+  if (!labels.length) { destroyChart('chart-voluntary-practice'); return; }
+
+  const vol  = labels.map(l => stats[l].voluntary);
+  const inst = labels.map(l => stats[l].instrumental);
+  const pct  = labels.map(l => {
+    const t = stats[l].voluntary + stats[l].instrumental;
+    return t ? Math.round((stats[l].voluntary / t) * 100) : 0;
+  });
+
+  destroyChart('chart-voluntary-practice');
+  const ctx = document.getElementById('chart-voluntary-practice');
+  if (!ctx) return;
+
+  charts['chart-voluntary-practice'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Voluntary',
+          data: vol,
+          backgroundColor: PALETTE[1] + 'cc',
+          borderColor: PALETTE[1],
+          borderWidth: 1.5,
+          borderRadius: 6,
+          borderSkipped: false,
+        },
+        {
+          label: 'Gate-driven',
+          data: inst,
+          backgroundColor: '#475569aa',
+          borderColor: '#64748b',
+          borderWidth: 1.5,
+          borderRadius: 6,
+          borderSkipped: false,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#e2e8f0', font: { size: 12 }, boxWidth: 12, padding: 16 }
+        },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => c.datasetIndex === 0
+              ? ` ${c.parsed.y} voluntary · ${pct[c.dataIndex]}% of ${vol[c.dataIndex] + inst[c.dataIndex]} sessions`
+              : ` ${c.parsed.y} gate-driven`
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' } },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: 'Sessions started', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
 function renderCompletionRate() {
   const taskEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('task'));
   const counts = {};
