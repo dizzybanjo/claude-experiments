@@ -413,6 +413,7 @@
     <div class="stat-card"><div class="label">Date range</div><div class="value" style="font-size:15px;letter-spacing:-0.3px" id="stat-range">—</div></div>
     <div class="stat-card"><div class="label">DAU / MAU</div><div class="value" id="stat-dau-mau">—</div></div>
     <div class="stat-card"><div class="label">Avg session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-len">—</div></div>
+    <div class="stat-card"><div class="label">Median session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-median">—</div></div>
   </div>
 
   <!-- Charts wrapper -->
@@ -453,6 +454,11 @@
           <h3>Resonance by Chapter</h3>
           <p class="sub">Average resonance level recorded during each chapter</p>
           <div class="chart-wrap"><canvas id="chart-chap-resonance"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Surplus Resonance at Chapter Entry</h3>
+          <p class="sub">Average resonance above the gate on a user's first entry — only chapters with a resonance requirement</p>
+          <div class="chart-wrap"><canvas id="chart-chap-resonance-surplus"></canvas></div>
         </div>
         <div class="chart-card" style="grid-column: 1 / -1;">
           <h3>Time of Day — Chapters</h3>
@@ -691,22 +697,22 @@ const PALETTE = ['#6c63ff','#34d399','#fbbf24','#f87171','#60a5fa','#a78bfa','#f
 const STATE_CONDITIONS = [
   null,
   { toEnterState: 1,  conditions: {} },
-  { toEnterState: 2,  conditions: { chapterCompleted: 1 } },
-  { toEnterState: 3,  conditions: { chapterCompleted: 2, day: 2 } },
-  { toEnterState: 4,  conditions: { chapterCompleted: 3 } },
-  { toEnterState: 5,  conditions: { chapterCompleted: 4, day: 3 } },
-  { toEnterState: 6,  conditions: { chapterCompleted: 5 } },
-  { toEnterState: 7,  conditions: { chapterCompleted: 6 } },
-  { toEnterState: 8,  conditions: { chapterCompleted: 7, day: 4 } },
-  { toEnterState: 9,  conditions: { chapterCompleted: 8, day: 5 } },
-  { toEnterState: 10, conditions: { chapterCompleted: 9, day: 6 } },
-  { toEnterState: 11, conditions: { chapterCompleted: 10 } },
-  { toEnterState: 12, conditions: { chapterCompleted: 11, day: 7 } },
-  { toEnterState: 13, conditions: { chapterCompleted: 12 } },
-  { toEnterState: 14, conditions: { chapterCompleted: 13, day: 8 } },
-  { toEnterState: 15, conditions: { chapterCompleted: 14, day: 9 } },
-  { toEnterState: 16, conditions: { chapterCompleted: 15, day: 10 } },
-  { toEnterState: 17, conditions: { chapterCompleted: 16 } },
+  { toEnterState: 2,  conditions: { currentState: 1,  chapterCompleted: 1 } },
+  { toEnterState: 3,  conditions: { currentState: 2,  chapterCompleted: 2,  day: 2 } },
+  { toEnterState: 4,  conditions: { currentState: 3,  chapterCompleted: 3,  nature: true } },
+  { toEnterState: 5,  conditions: { currentState: 4,  chapterCompleted: 4,  day: 3,  resonance: 40 } },
+  { toEnterState: 6,  conditions: { currentState: 5,  chapterCompleted: 5 } },
+  { toEnterState: 7,  conditions: { currentState: 6,  chapterCompleted: 6,  resonance: 50 } },
+  { toEnterState: 8,  conditions: { currentState: 7,  chapterCompleted: 7,  slowTimeWasTrue: true, nature: true, day: 4, resonance: 60 } },
+  { toEnterState: 9,  conditions: { currentState: 8,  chapterCompleted: 8,  day: 5,  resonance: 60 } },
+  { toEnterState: 10, conditions: { currentState: 9,  chapterCompleted: 9,  day: 6,  resonance: 60 } },
+  { toEnterState: 11, conditions: { currentState: 10, chapterCompleted: 10, clairvoyance: true, resonance: 70 } },
+  { toEnterState: 12, conditions: { currentState: 11, chapterCompleted: 11, day: 7,  nature: true, water: true, resonance: 80 } },
+  { toEnterState: 13, conditions: { currentState: 12, chapterCompleted: 12 } },
+  { toEnterState: 14, conditions: { currentState: 13, chapterCompleted: 13, day: 8,  night: true, dreamweaving: true, resonance: 90 } },
+  { toEnterState: 15, conditions: { currentState: 14, chapterCompleted: 14, day: 9,  slowTime: true, night: true, resonance: 50 } },
+  { toEnterState: 16, conditions: { currentState: 15, chapterCompleted: 15, day: 10, persuasion: true, resonance: 95 } },
+  { toEnterState: 17, conditions: { currentState: 16, chapterCompleted: 16 } },
 ];
 
 const ACTIVITIES     = ['breathing', 'meditation', 'nature'];
@@ -1139,6 +1145,7 @@ function applyFilters() {
   renderDropOff();
   renderReEntry();
   renderResonanceByChapter();
+  renderChapterResonanceSurplus();
   renderChapterTimeOfDay();
   // activities
   renderGroupCharts(ACTIVITIES, 'chart-act-volume', 'chart-act-resonance',
@@ -1226,6 +1233,19 @@ const users = new Set(filteredData.map(r => r[cols.user]).filter(Boolean));
       sessionLenEl.textContent = avg >= 60 ? `${(avg / 60).toFixed(1)}h` : `${avg.toFixed(1)}m`;
     } else {
       sessionLenEl.textContent = '—';
+    }
+  }
+
+  // Median session length stat
+  const sessionMedianEl = document.getElementById('stat-session-median');
+  if (sessionMedianEl) {
+    if (sessionData.length) {
+      const sorted = sessionData.map(s => s.length).sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      sessionMedianEl.textContent = median >= 60 ? `${(median / 60).toFixed(1)}h` : `${median.toFixed(1)}m`;
+    } else {
+      sessionMedianEl.textContent = '—';
     }
   }
 }
@@ -1466,6 +1486,102 @@ function renderResonanceByChapter() {
   });
   renderBarChart('chart-chap-resonance', labels, data,
     labels.map((_,i) => PALETTE[i % PALETTE.length]), 'Avg resonance');
+}
+
+// How much resonance users had spare when they first entered each gated chapter:
+// entry resonance minus the gate from STATE_CONDITIONS. Chapters without a
+// resonance gate have nothing to subtract and are left off.
+function renderChapterResonanceSurplus() {
+  const resReq = {};
+  STATE_CONDITIONS.forEach(sc => {
+    if (sc && sc.conditions && typeof sc.conditions.resonance === 'number') {
+      resReq[sc.toEnterState] = sc.conditions.resonance;
+    }
+  });
+
+  const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
+
+  // First entry per user per chapter — that's the event that crossed the gate;
+  // later re-entries have drifted away from it.
+  const firstEntry = {};
+  chEvts.forEach(r => {
+    const user = r[cols.user];
+    const m    = (r[cols.entity] || '').match(/(\d+)/);
+    const res  = parseFloat(r[cols.resonance]);
+    const dt   = parseDate(r[cols.datetime]);
+    if (!user || !m || isNaN(res) || !dt) return;
+    const ch = parseInt(m[1], 10);
+    if (!(ch in resReq)) return;
+    if (!isStartAction(r[cols.action] || '')) return;
+    const key = `${user}||${ch}`;
+    if (!firstEntry[key] || dt < firstEntry[key].dt) firstEntry[key] = { ch, dt, res };
+  });
+
+  const byChapter = {};
+  Object.values(firstEntry).forEach(({ ch, res }) => {
+    if (!byChapter[ch]) byChapter[ch] = [];
+    byChapter[ch].push(res - resReq[ch]);
+  });
+
+  const chapters = Object.keys(byChapter).map(Number).sort((a, b) => a - b);
+  if (!chapters.length) { destroyChart('chart-chap-resonance-surplus'); return; }
+
+  const labels = chapters.map(ch => `chapter${ch} (≥${resReq[ch]})`);
+  const data   = chapters.map(ch => {
+    const arr = byChapter[ch];
+    return +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
+  });
+  const counts = chapters.map(ch => byChapter[ch].length);
+
+  destroyChart('chart-chap-resonance-surplus');
+  const ctx = document.getElementById('chart-chap-resonance-surplus');
+  if (!ctx) return;
+
+  // Below the gate shouldn't happen; colour it red so bad data stands out.
+  const bgColors = data.map((v, i) => v < 0 ? '#f87171' : PALETTE[i % PALETTE.length]);
+  charts['chart-chap-resonance-surplus'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: bgColors.map(c => c + 'cc'),
+        borderColor: bgColors,
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` +${c.parsed.y} avg surplus · ${counts[c.dataIndex]} user${counts[c.dataIndex] === 1 ? '' : 's'}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b', font: { size: 11 } },
+          grid: { color: '#1e2235' }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: 'Avg resonance above gate', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
 }
 
 // ---- activity metrics ----
