@@ -430,6 +430,11 @@
           <div class="chart-wrap"><canvas id="chart-chapters"></canvas></div>
         </div>
         <div class="chart-card">
+          <h3>Chapter Completions Cumulative</h3>
+          <p class="sub">Distinct users who reached each chapter or beyond — a user's highest chapter implies all below it</p>
+          <div class="chart-wrap"><canvas id="chart-chapters-cumulative"></canvas></div>
+        </div>
+        <div class="chart-card">
           <h3>Chapter Reach Rate</h3>
           <p class="sub">% of all users who reached each chapter</p>
           <div class="chart-wrap"><canvas id="chart-reach"></canvas></div>
@@ -1129,6 +1134,7 @@ function applyFilters() {
   renderStats();
   // chapters
   renderChapters();
+  renderChaptersCumulative();
   renderChapterReachRate();
   renderDropOff();
   renderReEntry();
@@ -1246,6 +1252,100 @@ function renderChapters() {
     labels.map((_, i) => PALETTE[i % PALETTE.length]),
     'Unique users'
   );
+}
+
+// ---- chart: chapters, cumulative ----
+// Counts a user at every chapter up to their highest, so dropped chapter events
+// upstream can't produce a chapter that reads higher than the one before it.
+function renderChaptersCumulative() {
+  const chapterEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('chapter')
+  );
+
+  const userMaxChapter = {};
+  let highest = 0;
+  chapterEvents.forEach(r => {
+    const user = r[cols.user];
+    const m = (r[cols.entity] || '').match(/(\d+)/);
+    if (!user || !m) return;
+    const n = parseInt(m[1], 10);
+    if (!userMaxChapter[user] || n > userMaxChapter[user]) userMaxChapter[user] = n;
+    if (n > highest) highest = n;
+  });
+
+  if (!highest) { destroyChart('chart-chapters-cumulative'); return; }
+
+  const counts = new Array(highest + 1).fill(0);
+  Object.values(userMaxChapter).forEach(maxCh => {
+    for (let ch = 1; ch <= maxCh; ch++) counts[ch]++;
+  });
+
+  const labels = [];
+  const data   = [];
+  for (let ch = 1; ch <= highest; ch++) {
+    labels.push('chapter' + ch);
+    data.push(counts[ch]);
+  }
+
+  const totalUsers = new Set(filteredData.map(r => r[cols.user]).filter(Boolean)).size;
+  const pct = data.map(n => totalUsers ? +((n / totalUsers) * 100).toFixed(1) : 0);
+
+  destroyChart('chart-chapters-cumulative');
+  const ctx = document.getElementById('chart-chapters-cumulative');
+  if (!ctx) return;
+
+  const bgColors = labels.map((_, i) => PALETTE[i % PALETTE.length]);
+  charts['chart-chapters-cumulative'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: bgColors.map(c => c + 'cc'),
+        borderColor: bgColors,
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` ${c.parsed.y.toLocaleString()} users · ${pct[c.dataIndex]}% of ${totalUsers.toLocaleString()}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: 'Unique users', color: '#475569', font: { size: 11 } }
+        },
+        yPct: {
+          position: 'right',
+          beginAtZero: true,
+          max: totalUsers ? 100 : undefined,
+          ticks: { color: '#64748b', font: { size: 12 }, callback: v => v + '%' },
+          grid: { display: false },
+          title: { display: true, text: '% of users', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
 }
 
 // ---- chart group: volume + resonance delta for a named entity set ----
