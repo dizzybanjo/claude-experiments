@@ -398,6 +398,10 @@
       <label>Min engagement (mins)</label>
       <input type="number" id="filter-min-engagement" min="0" step="1" value="5">
     </div>
+    <div class="field-group" style="max-width:170px; flex:0 1 170px;">
+      <label title="Ambient is the default patch, so short periods are just the app handing off between activities. Staying in ambient beyond this counts as deliberate passive practice.">Min ambient listen (secs)</label>
+      <input type="number" id="filter-ambient-min" min="0" step="1" value="5">
+    </div>
     <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never reached chapter 1">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
@@ -487,7 +491,7 @@
         </div>
         <div class="chart-card">
           <h3>Voluntary Practice</h3>
-          <p class="sub">Sessions started when the user already met the next chapter's resonance gate — practice that unlocks nothing</p>
+          <p class="sub">Sessions started when the user already met the next chapter's resonance gate — practice that unlocks nothing. Ambient counted as listening periods over 5s</p>
           <div class="chart-wrap"><canvas id="chart-voluntary-practice"></canvas></div>
         </div>
         <div class="chart-card">
@@ -1024,6 +1028,7 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   filterMinEngagement = true;
   document.getElementById('filter-engagement-btn').classList.add('active');
   document.getElementById('filter-min-engagement').value = '5';
+  document.getElementById('filter-ambient-min').value = String(AMBIENT_MIN_LISTEN_DEFAULT);
   applyFilters();
 });
 
@@ -1111,6 +1116,8 @@ document.getElementById('filter-engagement-btn').addEventListener('click', () =>
 document.getElementById('filter-min-engagement').addEventListener('change', () => {
   if (filterMinEngagement) applyFilters();
 });
+
+document.getElementById('filter-ambient-min').addEventListener('change', applyFilters);
 
 function applyFilters() {
   // Always recompute detected cheats from the full raw dataset
@@ -1591,6 +1598,92 @@ function renderChapterResonanceSurplus() {
 }
 
 // ---- activity metrics ----
+// Ambient (deep listening) logs a repeated "started" tick while it runs rather
+// than a start/finish pair, so raw events aren't sessions — within a listening
+// Ambient is the default patch: it loads whenever no chapter, task or other
+// patch is running, and it has no close event of its own. So an ambient period
+// runs from its "started" event until the next thing the user actually opens,
+// or until the app session ends.
+//
+// Three quirks the pairing has to handle:
+//  - Ambient re-fires while it runs (ticks ~82s apart), so consecutive ambient
+//    events are one continuous period, not separate ones.
+//  - Ambient's start is logged ~1s BEFORE the "finished" event of the activity
+//    it replaces, so "finished" events can't terminate a period.
+//  - The app doesn't always log a close. Without one, a period would run until
+//    the user's next visit days later, so we clamp to the enclosing app session
+//    and drop any period we can't bound.
+//
+// Below this a period is just the app handing off between two activities; past
+// it, staying in ambient is taken as deliberate passive use. Set in the UI,
+// since where the handoff ends and the choice begins is a judgement call.
+const AMBIENT_MIN_LISTEN_DEFAULT = 5;
+
+function getAmbientMinListenMs() {
+  const el = document.getElementById('filter-ambient-min');
+  const v  = el ? parseFloat(el.value) : NaN;
+  return (isNaN(v) || v < 0 ? AMBIENT_MIN_LISTEN_DEFAULT : v) * 1000;
+}
+
+function buildAmbientPeriods(data) {
+  const byUser = {};
+  data.forEach(r => {
+    const dt = parseDate(r[cols.datetime]);
+    if (!r[cols.user] || !dt) return;
+    (byUser[r[cols.user]] = byUser[r[cols.user]] || []).push({
+      dt,
+      type:   (r[cols.type] || '').toLowerCase(),
+      entity: (r[cols.entity] || '').toLowerCase(),
+      action: (r[cols.action] || '').toLowerCase(),
+      res:    parseFloat(r[cols.resonance]),
+    });
+  });
+
+  // Known app-session windows, so an unclosed period can be clamped to one.
+  const windows = {};
+  buildAppSessions(data, false).forEach(s => {
+    (windows[s.user] = windows[s.user] || []).push(s);
+  });
+
+  const periods = [];
+  Object.entries(byUser).forEach(([user, ev]) => {
+    ev.sort((a, b) => a.dt - b.dt);
+    let i = 0;
+    while (i < ev.length) {
+      const e = ev[i];
+      if (!(e.type === 'patch' && e.entity === 'ambient')) { i++; continue; }
+
+      const start = e.dt;
+      const startRes = e.res;
+      let j = i + 1;
+      let end = null;
+      for (; j < ev.length; j++) {
+        const n = ev[j];
+        if (n.type === 'patch' && n.entity === 'ambient') continue;  // still running
+        if (isEndAction(n.action)) continue;                         // fires just after ambient starts
+        if (n.type === 'app' && n.action.startsWith('opened')) continue;
+        end = n.dt;
+        break;
+      }
+
+      // A period is only trustworthy if we can bound it by the app session it
+      // started in. Without a known session window there's no close event to
+      // stop it, so it would run until the user's next visit days later — drop
+      // those rather than invent a duration.
+      const win = (windows[user] || []).find(w => start >= w.start && start <= w.end);
+      if (win) {
+        if (!end || end > win.end) end = win.end;
+        if (end > start) {
+          periods.push({ user, dt: start, res: startRes, length: (end - start) / 60000 });
+        }
+      }
+      i = Math.max(j, i + 1);
+    }
+  });
+
+  return periods;
+}
+
 // Practice that unlocks nothing. At each activity start we compare the user's
 // resonance to the gate on the next chapter above the highest one they've
 // entered. If they already clear it, the session buys them no progression.
@@ -1619,35 +1712,47 @@ function renderVoluntaryPractice() {
   });
   Object.values(entriesByUser).forEach(list => list.sort((a, b) => a.dt - b.dt));
 
-  const taskStarts = filteredData.filter(r =>
-    (r[cols.type] || '').toLowerCase().includes('task') && isStartAction(r[cols.action] || '')
-  );
-
-  const stats = {};   // entity -> { voluntary, instrumental }
-  const voluntaryUsers = new Set();
-  taskStarts.forEach(r => {
-    const user   = r[cols.user];
-    const entity = (r[cols.entity] || '').toLowerCase();
-    const res    = parseFloat(r[cols.resonance]);
-    const dt     = parseDate(r[cols.datetime]);
-    if (!user || !entity || isNaN(res) || !dt) return;
-
+  function isVoluntary(user, res, dt) {
     // Highest chapter entered at or before this moment.
     let current = 0;
     (entriesByUser[user] || []).forEach(e => {
       if (e.dt <= dt && e.ch > current) current = e.ch;
     });
-
     const next = current + 1;
-    let voluntary;
-    if (res >= RES_CAP)          voluntary = true;   // capped, nothing to gain
-    else if (next > maxState)    voluntary = true;   // finished the story
-    else if (!(next in resReq))  voluntary = true;   // next chapter has no resonance gate
-    else                         voluntary = res >= resReq[next];
+    if (res >= RES_CAP)         return true;   // capped, nothing to gain
+    if (next > maxState)        return true;   // finished the story
+    if (!(next in resReq))      return true;   // next chapter has no resonance gate
+    return res >= resReq[next];
+  }
 
+  const stats = {};   // entity -> { voluntary, instrumental }
+  const bump = (entity, voluntary) => {
     if (!stats[entity]) stats[entity] = { voluntary: 0, instrumental: 0 };
     stats[entity][voluntary ? 'voluntary' : 'instrumental']++;
-    if (voluntary) voluntaryUsers.add(user);
+  };
+
+  // Only activities that can actually move resonance belong here — EXTRAS
+  // (rain, stargazing) don't, so they can never be gate-driven and scoring them
+  // on a voluntary/instrumental axis would be meaningless.
+  filteredData.forEach(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('task')) return;
+    if (!isStartAction(r[cols.action] || '')) return;
+    const user   = r[cols.user];
+    const entity = (r[cols.entity] || '').toLowerCase();
+    const res    = parseFloat(r[cols.resonance]);
+    const dt     = parseDate(r[cols.datetime]);
+    if (!user || !entity || isNaN(res) || !dt) return;
+    const matched = ACTIVITIES.find(a => entity.includes(a));
+    if (!matched) return;
+    bump(matched, isVoluntary(user, res, dt));
+  });
+
+  // Ambient counts as passive practice, but only where the user actually dwelt
+  // in it rather than passing through on the way to something else.
+  const ambientMinMs = getAmbientMinListenMs();
+  buildAmbientPeriods(filteredData).forEach(p => {
+    if (p.length * 60000 < ambientMinMs) return;
+    bump('ambient', isVoluntary(p.user, p.res, p.dt));
   });
 
   const labels = Object.keys(stats).sort((a, b) =>
