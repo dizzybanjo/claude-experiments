@@ -399,7 +399,7 @@
       <input type="number" id="filter-min-engagement" min="0" step="1" value="5">
     </div>
     <div class="field-group" style="max-width:170px; flex:0 1 170px;">
-      <label title="Ambient is the default patch, so short periods are just the app handing off between activities. Staying in ambient beyond this counts as deliberate passive practice.">Min ambient listen (secs)</label>
+      <label title="Deep Listening is the default patch, so short periods are just the app handing off between activities. Staying in it beyond this counts as deliberate passive practice.">Min deep listen (secs)</label>
       <input type="number" id="filter-ambient-min" min="0" step="1" value="5">
     </div>
     <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never reached chapter 1">Min Engagement</button>
@@ -476,7 +476,7 @@
     <div class="charts-section">
       <div class="section-header">
         <span class="section-title">Activities</span>
-        <span class="section-tags">breathing · meditation · nature</span>
+        <span class="section-tags">breathing · meditation · nature · deep listening</span>
       </div>
       <div class="charts-grid">
         <div class="chart-card">
@@ -491,12 +491,12 @@
         </div>
         <div class="chart-card">
           <h3>Voluntary Practice</h3>
-          <p class="sub">Sessions started when the user already met the next chapter's resonance gate — practice that unlocks nothing. Ambient counted as listening periods over 5s</p>
+          <p class="sub">Sessions started when the user already met the next chapter's resonance gate — practice that unlocks nothing. Side bar shows what each activity pays out, so volume can be read against reward</p>
           <div class="chart-wrap"><canvas id="chart-voluntary-practice"></canvas></div>
         </div>
         <div class="chart-card">
           <h3>Completion Rate</h3>
-          <p class="sub">% of started sessions that reached a finished event</p>
+          <p class="sub">% of started sessions that reached a finished event. Excludes Deep Listening, which has no finish event</p>
           <div class="chart-wrap"><canvas id="chart-completion"></canvas></div>
         </div>
         <div class="chart-card">
@@ -682,6 +682,7 @@ let rawData = [];
 let filteredData = [];
 let charts = {};
 let sessionData = [];
+let activityRows = [];
 let filterAlpha = false;
 let filterCheatDev = true;
 let detectedCheats = new Set();
@@ -724,7 +725,17 @@ const STATE_CONDITIONS = [
   { toEnterState: 17, conditions: { currentState: 16, chapterCompleted: 16 } },
 ];
 
-const ACTIVITIES     = ['breathing', 'meditation', 'nature'];
+// 'ambient' is the entity name in the export; the product calls it Deep Listening.
+const ACTIVITIES     = ['breathing', 'meditation', 'nature', 'ambient'];
+const ACTIVITY_LABELS = {
+  breathing:  'Breathing',
+  meditation: 'Meditation',
+  nature:     'Nature',
+  ambient:    'Deep Listening',
+  rain:       'Rain',
+  stargazing: 'Stargazing',
+};
+const labelFor = a => ACTIVITY_LABELS[a] || (a.charAt(0).toUpperCase() + a.slice(1));
 const EXTRAS         = ['rain', 'stargazing'];
 const START_KEYWORDS = ['start', 'begin', 'open', 'launch'];
 const END_KEYWORDS   = ['end', 'complete', 'finish', 'close', 'stop', 'done'];
@@ -1148,6 +1159,10 @@ function applyFilters() {
   });
 
   sessionData = buildAppSessions(filteredData);
+  // Activity charts only: filteredData plus Deep Listening recast as task rows.
+  // Kept separate so synthetic rows never reach user counts, resonance stats,
+  // chapter charts or retention.
+  activityRows = filteredData.concat(buildAmbientRows(filteredData));
 
   renderStats();
   // chapters
@@ -1383,7 +1398,7 @@ function renderChaptersCumulative() {
 
 // ---- chart group: volume + resonance delta for a named entity set ----
 function renderGroupCharts(entityNames, volumeChartId, resonanceChartId, palette) {
-  const taskEvents = filteredData.filter(r =>
+  const taskEvents = activityRows.filter(r =>
     (r[cols.type] || '').toLowerCase().includes('task')
   );
 
@@ -1406,7 +1421,7 @@ function renderGroupCharts(entityNames, volumeChartId, resonanceChartId, palette
   });
 
   renderBarChart(volumeChartId,
-    entityNames,
+    entityNames.map(labelFor),
     entityNames.map(n => volCounts[n]),
     palette, 'Sessions'
   );
@@ -1429,7 +1444,7 @@ function renderGroupCharts(entityNames, volumeChartId, resonanceChartId, palette
     return +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(3);
   });
 
-  renderBarChart(resonanceChartId, resLabels, resData, palette, 'Avg Δ resonance');
+  renderBarChart(resonanceChartId, resLabels.map(labelFor), resData, palette, 'Avg Δ resonance');
 }
 
 // ---- chapter metrics ----
@@ -1657,14 +1672,23 @@ function buildAmbientPeriods(data) {
       const startRes = e.res;
       let j = i + 1;
       let end = null;
+      // App rows carry resonance 0, so they can't close out a delta. Fall back to
+      // the last ambient tick, which does carry the live value.
+      let lastTickRes = e.res;
+      let endRes = null;
       for (; j < ev.length; j++) {
         const n = ev[j];
-        if (n.type === 'patch' && n.entity === 'ambient') continue;  // still running
+        if (n.type === 'patch' && n.entity === 'ambient') {          // still running
+          if (!isNaN(n.res)) lastTickRes = n.res;
+          continue;
+        }
         if (isEndAction(n.action)) continue;                         // fires just after ambient starts
         if (n.type === 'app' && n.action.startsWith('opened')) continue;
         end = n.dt;
+        if (n.type !== 'app' && !isNaN(n.res)) endRes = n.res;
         break;
       }
+      if (endRes === null) endRes = lastTickRes;
 
       // A period is only trustworthy if we can bound it by the app session it
       // started in. Without a known session window there's no close event to
@@ -1672,9 +1696,12 @@ function buildAmbientPeriods(data) {
       // those rather than invent a duration.
       const win = (windows[user] || []).find(w => start >= w.start && start <= w.end);
       if (win) {
-        if (!end || end > win.end) end = win.end;
+        if (!end || end > win.end) { end = win.end; endRes = lastTickRes; }
         if (end > start) {
-          periods.push({ user, dt: start, res: startRes, length: (end - start) / 60000 });
+          periods.push({
+            user, dt: start, res: startRes, endRes,
+            length: (end - start) / 60000, end,
+          });
         }
       }
       i = Math.max(j, i + 1);
@@ -1682,6 +1709,25 @@ function buildAmbientPeriods(data) {
   });
 
   return periods;
+}
+
+// Recast ambient periods as task-shaped start/finish rows so the activity charts
+// can treat Deep Listening like any other activity without special-casing.
+function buildAmbientRows(data) {
+  const minMs = getAmbientMinListenMs();
+  const rows = [];
+  buildAmbientPeriods(data).forEach(p => {
+    if (p.length * 60000 < minMs) return;
+    rows.push({
+      [cols.user]: p.user, [cols.type]: 'task', [cols.entity]: 'ambient',
+      [cols.action]: 'started', [cols.resonance]: p.res, [cols.datetime]: p.dt,
+    });
+    rows.push({
+      [cols.user]: p.user, [cols.type]: 'task', [cols.entity]: 'ambient',
+      [cols.action]: 'finished', [cols.resonance]: p.endRes, [cols.datetime]: p.end,
+    });
+  });
+  return rows;
 }
 
 // Practice that unlocks nothing. At each activity start we compare the user's
@@ -1767,6 +1813,22 @@ function renderVoluntaryPractice() {
     return t ? Math.round((stats[l].voluntary / t) * 100) : 0;
   });
 
+  // Side bar: what each activity actually pays out, so the volume of voluntary
+  // practice can be read against the resonance it returns.
+  const deltaMap = buildDeltaMap(activityRows.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task') &&
+    ACTIVITIES.some(a => (r[cols.entity] || '').toLowerCase().includes(a))
+  ));
+  const avgDelta = labels.map(l => {
+    const key = Object.keys(deltaMap).find(k => k.toLowerCase().includes(l));
+    const arr = key ? deltaMap[key] : null;
+    return arr && arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : null;
+  });
+  const deltaN = labels.map(l => {
+    const key = Object.keys(deltaMap).find(k => k.toLowerCase().includes(l));
+    return key ? deltaMap[key].length : 0;
+  });
+
   destroyChart('chart-voluntary-practice');
   const ctx = document.getElementById('chart-voluntary-practice');
   if (!ctx) return;
@@ -1774,11 +1836,13 @@ function renderVoluntaryPractice() {
   charts['chart-voluntary-practice'] = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels,
+      labels: labels.map(labelFor),
       datasets: [
         {
           label: 'Voluntary',
           data: vol,
+          stack: 'sessions',
+          yAxisID: 'y',
           backgroundColor: PALETTE[1] + 'cc',
           borderColor: PALETTE[1],
           borderWidth: 1.5,
@@ -1788,8 +1852,21 @@ function renderVoluntaryPractice() {
         {
           label: 'Gate-driven',
           data: inst,
+          stack: 'sessions',
+          yAxisID: 'y',
           backgroundColor: '#475569aa',
           borderColor: '#64748b',
+          borderWidth: 1.5,
+          borderRadius: 6,
+          borderSkipped: false,
+        },
+        {
+          label: 'Avg Δ resonance',
+          data: avgDelta,
+          stack: 'reward',
+          yAxisID: 'yRes',
+          backgroundColor: PALETTE[2] + 'cc',
+          borderColor: PALETTE[2],
           borderWidth: 1.5,
           borderRadius: 6,
           borderSkipped: false,
@@ -1811,9 +1888,14 @@ function renderVoluntaryPractice() {
           titleColor: '#e2e8f0',
           bodyColor: '#94a3b8',
           callbacks: {
-            label: c => c.datasetIndex === 0
-              ? ` ${c.parsed.y} voluntary · ${pct[c.dataIndex]}% of ${vol[c.dataIndex] + inst[c.dataIndex]} sessions`
-              : ` ${c.parsed.y} gate-driven`
+            label: c => {
+              if (c.datasetIndex === 0)
+                return ` ${c.parsed.y} voluntary · ${pct[c.dataIndex]}% of ${vol[c.dataIndex] + inst[c.dataIndex]} sessions`;
+              if (c.datasetIndex === 1) return ` ${c.parsed.y} gate-driven`;
+              return c.parsed.y == null
+                ? ' no paired sessions to measure gain'
+                : ` +${c.parsed.y} avg resonance per session (n=${deltaN[c.dataIndex]})`;
+            }
           }
         }
       },
@@ -1825,6 +1907,13 @@ function renderVoluntaryPractice() {
           ticks: { color: '#64748b', font: { size: 12 } },
           grid: { color: '#1e2235' },
           title: { display: true, text: 'Sessions started', color: '#475569', font: { size: 11 } }
+        },
+        yRes: {
+          position: 'right',
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { display: false },
+          title: { display: true, text: 'Avg Δ resonance / session', color: '#475569', font: { size: 11 } }
         }
       }
     }
@@ -1832,20 +1921,24 @@ function renderVoluntaryPractice() {
 }
 
 function renderCompletionRate() {
+  // Deep Listening is excluded: it has no finish event of its own, so its end is
+  // inferred from the next thing the user opens. It can't be abandoned, and a
+  // synthetic 100% would be a fabricated number rather than a measured one.
+  const completable = ACTIVITIES.filter(a => a !== 'ambient');
   const taskEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('task'));
   const counts = {};
-  ACTIVITIES.forEach(a => { counts[a] = { started: 0, finished: 0 }; });
+  completable.forEach(a => { counts[a] = { started: 0, finished: 0 }; });
   taskEvts.forEach(r => {
     const entity  = (r[cols.entity]||'').toLowerCase();
-    const matched = ACTIVITIES.find(a => entity.includes(a));
+    const matched = completable.find(a => entity.includes(a));
     if (!matched) return;
     const action = r[cols.action] || '';
     if (isStartAction(action))    counts[matched].started++;
     else if (isEndAction(action)) counts[matched].finished++;
   });
-  const data = ACTIVITIES.map(a => counts[a].started
+  const data = completable.map(a => counts[a].started
     ? +((counts[a].finished / counts[a].started) * 100).toFixed(1) : 0);
-  renderBarChart('chart-completion', ACTIVITIES, data,
+  renderBarChart('chart-completion', completable.map(labelFor), data,
     [PALETTE[0], PALETTE[1], PALETTE[2]], '% completed');
 }
 
@@ -1883,7 +1976,7 @@ function buildDurationMap(events) {
 }
 
 function renderAvgDuration() {
-  const taskEvts = filteredData.filter(r =>
+  const taskEvts = activityRows.filter(r =>
     (r[cols.type]||'').toLowerCase().includes('task') &&
     ACTIVITIES.some(a => (r[cols.entity]||'').toLowerCase().includes(a))
   );
@@ -1897,7 +1990,7 @@ function renderAvgDuration() {
     const arr = dMap[key];
     return +(arr.reduce((x,y) => x+y, 0) / arr.length).toFixed(2);
   });
-  renderBarChart('chart-duration', labels, data, [PALETTE[0], PALETTE[1], PALETTE[2]], 'Avg mins');
+  renderBarChart('chart-duration', labels.map(labelFor), data, [PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3]], 'Avg mins');
 }
 
 // ---- engagement metrics ----
@@ -2044,7 +2137,7 @@ function renderStreaks() {
 
 // ---- activity resonance trend over time ----
 function renderActivityResonanceTrend() {
-  const taskEvts = filteredData.filter(r =>
+  const taskEvts = activityRows.filter(r =>
     (r[cols.type] || '').toLowerCase().includes('task')
   );
 
@@ -2106,9 +2199,9 @@ function renderActivityResonanceTrend() {
 
   if (!labels.length) { destroyChart('chart-act-resonance-trend'); return; }
 
-  const colors = [PALETTE[0], PALETTE[1], PALETTE[2]];
+  const colors = [PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3]];
   const datasets = ACTIVITIES.map((activity, i) => ({
-    label: activity.charAt(0).toUpperCase() + activity.slice(1),
+    label: labelFor(activity),
     data: labels.map(bucket => {
       const arr = activityData[activity][bucket];
       if (!arr || !arr.length) return null;
@@ -2201,7 +2294,7 @@ function renderMultiLineTimeChart(canvasId, datasets, yLabel) {
 }
 
 function renderActivityTimeOfDay() {
-  const taskEvts = filteredData.filter(r =>
+  const taskEvts = activityRows.filter(r =>
     (r[cols.type] || '').toLowerCase().includes('task') &&
     isStartAction(r[cols.action] || '')
   );
@@ -2222,7 +2315,7 @@ function renderActivityTimeOfDay() {
   if (!hasData) { destroyChart('chart-act-time-of-day'); return; }
 
   const datasets = ACTIVITIES.map((activity, i) => ({
-    label: activity.charAt(0).toUpperCase() + activity.slice(1),
+    label: labelFor(activity),
     data: hourData[activity],
     borderColor: PALETTE[i],
     backgroundColor: PALETTE[i] + '22',
