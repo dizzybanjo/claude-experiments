@@ -388,6 +388,20 @@
       <div id="excl-user-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
     </div>
     <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
+      <label title="A user who finished chapter 17 and hit reset starts a fresh run under a NEW user ID; the app doesn't log the link. Enter it as replay=original (e.g. 2SZCGM=ELDVJ2) to join the two runs as one person.">Replay users &mdash; second run after a reset (replay=original)</label>
+    </div>
+    <div class="field-group" style="flex: 2; min-width: 280px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="user-input-wrap" style="flex:1;">
+          <span class="user-prefix">USER-</span>
+          <input type="text" id="filter-replay-input" placeholder="2SZCGM=ELDVJ2" list="replay-user-datalist">
+        </div>
+        <button class="btn btn-ghost" id="replay-add-btn" style="white-space:nowrap; flex-shrink:0; padding:8px 12px;">+ Add</button>
+      </div>
+      <datalist id="replay-user-datalist"></datalist>
+      <div id="replay-user-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+    </div>
+    <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
       <label>Cohort: ALPHA TESTERS &mdash; include only users registered after</label>
     </div>
     <div class="field-group">
@@ -579,13 +593,18 @@
         </div>
         <div class="chart-card">
           <h3>Post-Ending Engagement</h3>
-          <p class="sub">Task events after a user's first final-chapter event — past the ending there's no story left to unlock, so anything they do is practice for its own sake. Counts only; hover for the observation window, which varies hugely</p>
+          <p class="sub">Task events after a user's first final-chapter event — past the ending there's no story left to unlock, so anything they do is practice for its own sake. A linked replay run counts in full toward the original user. Counts only; hover for the observation window, which varies hugely</p>
           <div class="chart-wrap"><canvas id="chart-post-ending"></canvas></div>
         </div>
         <div class="chart-card">
           <h3>Practice-to-Narrative Ratio</h3>
           <p class="sub">Task events per distinct chapter reached, per user — high means the practice is the point, low means chapters are being collected. Re-entries don't count, so replaying a chapter isn't charged as more story</p>
           <div class="chart-wrap"><canvas id="chart-practice-narrative"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Replay Users — Engagement Across Both Runs</h3>
+          <p class="sub">Testers who finished the story, reset, and played the whole thing again under a new ID. Each bar stacks their first run and their replay run, so the full height is one person's total commitment. Add the links in the filters bar (replay=original). Hover for the per-run breakdown</p>
+          <div class="chart-wrap" id="chart-replay-wrap"><canvas id="chart-replay-engagement"></canvas></div>
         </div>
         <div class="chart-card" style="grid-column: 1 / -1;">
           <h3>Time of Day — All Usage</h3>
@@ -935,6 +954,70 @@ function addExclUser(suffix) {
   applyFilters();
 }
 
+// ---- replay users ----
+// A user who finishes chapter 17 and resets restarts under a fresh user ID, and
+// the app doesn't log the link. Each entry joins a replay ID to the original ID
+// it continues, so both runs can be read as one person. Stored as [replay,
+// original] pairs. Nothing is hardcoded — the operator supplies the links.
+const REPLAY_USERS_KEY = 'eiliad_replay_users';
+// Known replay links seeded on every load, then merged with any the operator
+// has added — same pattern as the default user exclusions. USER-2SZCGM is
+// USER-ELDVJ2's second run, confirmed by contacting the tester.
+const DEFAULT_REPLAY_PAIRS = [['USER-2SZCGM', 'USER-ELDVJ2']];
+let replayPairs = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(REPLAY_USERS_KEY) || '[]');
+    return new Map([...DEFAULT_REPLAY_PAIRS, ...raw].map(([replay, original]) => [replay, original || '']));
+  } catch (e) { return new Map(DEFAULT_REPLAY_PAIRS); }
+})();
+
+function saveReplayPairs() {
+  localStorage.setItem(REPLAY_USERS_KEY, JSON.stringify([...replayPairs]));
+}
+
+const shortId = u => (u && u.startsWith('USER-') ? u.slice(5) : u || '');
+
+function renderReplayTags() {
+  const container = document.getElementById('replay-user-tags');
+  if (!container) return;
+  container.innerHTML = '';
+  replayPairs.forEach((original, replay) => {
+    const tag = document.createElement('span');
+    tag.className = 'excl-tag';
+    const label = original
+      ? `${shortId(replay)} &larr; ${shortId(original)}`
+      : `${shortId(replay)} (replay)`;
+    tag.innerHTML = `${label} <span class="remove" data-user="${replay}">&times;</span>`;
+    tag.querySelector('.remove').addEventListener('click', () => {
+      replayPairs.delete(replay);
+      saveReplayPairs();
+      renderReplayTags();
+      applyFilters();
+    });
+    container.appendChild(tag);
+  });
+}
+
+// Accepts "REPLAY=ORIGINAL", "REPLAY<-ORIGINAL", or a bare "REPLAY". The USER-
+// prefix is optional on either side.
+function addReplayUser(text) {
+  if (!text) return;
+  const norm = id => {
+    id = (id || '').trim();
+    if (!id) return '';
+    return id.startsWith('USER-') ? id : 'USER-' + id;
+  };
+  const parts = text.split(/=|<-/);
+  const replay = norm(parts[0]);
+  const original = norm(parts[1]);
+  if (!replay) return;
+  replayPairs.set(replay, original);
+  saveReplayPairs();
+  renderReplayTags();
+  document.getElementById('filter-replay-input').value = '';
+  applyFilters();
+}
+
 // ---- user dropdown ----
 function getExcludedUsers() {
   const exclFrom    = document.getElementById('filter-excl-from').value;
@@ -1026,6 +1109,7 @@ function updateUserDropdown(excludedUsers) {
 // ---- filters ----
 function setupFilters() {
   updateUserDropdown(new Set());
+  renderReplayTags();
 
   // populate type filter
   const types = [...new Set(rawData.map(r => r[cols.type]).filter(Boolean))].sort();
@@ -1051,6 +1135,13 @@ document.getElementById('excl-user-add-btn').addEventListener('click', () => {
 });
 document.getElementById('filter-excl-user-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); addExclUser(e.target.value.trim()); }
+});
+
+document.getElementById('replay-add-btn').addEventListener('click', () => {
+  addReplayUser(document.getElementById('filter-replay-input').value.trim());
+});
+document.getElementById('filter-replay-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addReplayUser(e.target.value.trim()); }
 });
 
 document.getElementById('filter-alpha-btn').addEventListener('click', () => {
@@ -1243,6 +1334,7 @@ function applyFilters() {
   renderDaysActive();
   renderPostEnding();
   renderPracticeNarrative();
+  renderReplayEngagement();
   renderOverallTimeOfDay();
   renderResonanceOverTime();
   // streaks
@@ -1623,6 +1715,14 @@ function renderChaptersEligibleCumulative() {
           ticks: { color: '#64748b', font: { size: 12 } },
           grid: { color: '#1e2235' },
           title: { display: true, text: 'Unique users', color: '#475569', font: { size: 11 } }
+        },
+        yPct: {
+          position: 'right',
+          beginAtZero: true,
+          max: totalUsers ? 100 : undefined,
+          ticks: { color: '#64748b', font: { size: 12 }, callback: v => v + '%' },
+          grid: { display: false },
+          title: { display: true, text: '% of users', color: '#475569', font: { size: 11 } }
         }
       }
     }
@@ -2404,9 +2504,25 @@ function renderActivityOverTime() {
 // A user who reached the ending but whose chapter event was lost to a crash
 // cannot appear here: with no event there is no moment to measure from. So this
 // cohort is a floor.
+//
+// Replay runs are the purest post-ending signal there is. A user who finished
+// the story, reset, and replayed under a new ID did every bit of that second
+// run *after* the ending, by choice — so the whole replay run is attributed to
+// the original user's bar, and the replay ID is not shown separately.
 function renderPostEnding() {
   const id = 'chart-post-ending';
+
+  // original user -> [replay ids], from the operator's replay links
+  const replaysOf = {};
+  const replayWithOriginal = new Set();
+  replayPairs.forEach((original, replay) => {
+    if (!original) return;
+    (replaysOf[original] = replaysOf[original] || []).push(replay);
+    replayWithOriginal.add(replay);
+  });
+
   const firstFinal = {};
+  const fullActivity = {};   // user -> all their activity, for replay attribution
   let dataEnd = null;
 
   filteredData.forEach(r => {
@@ -2414,11 +2530,23 @@ function renderPostEnding() {
     const dt = parseDate(r[cols.datetime]);
     if (!user || !dt) return;
     if (!dataEnd || dt > dataEnd) dataEnd = dt;
-    if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
-    const m = (r[cols.entity] || '').match(/(\d+)/);
-    if (!m || parseInt(m[1], 10) !== MAX_STATE) return;
-    if (!firstFinal[user] || dt < firstFinal[user]) firstFinal[user] = dt;
+
+    const f = fullActivity[user] || (fullActivity[user] = { tasks: 0, ambient: 0, chapters: 0, days: new Set() });
+    f.days.add(localDayKey(dt));
+    const type = (r[cols.type] || '').toLowerCase();
+    if (type === 'task') f.tasks++;
+    else if (type === 'patch') f.ambient++;
+    else if (type.includes('chapter')) {
+      f.chapters++;
+      const m = (r[cols.entity] || '').match(/(\d+)/);
+      if (m && parseInt(m[1], 10) === MAX_STATE && (!firstFinal[user] || dt < firstFinal[user])) {
+        firstFinal[user] = dt;
+      }
+    }
   });
+
+  // A replay run belongs to the original user, so it never earns its own bar.
+  replayWithOriginal.forEach(rep => { delete firstFinal[rep]; });
 
   const after = {};
   Object.keys(firstFinal).forEach(u => {
@@ -2438,14 +2566,30 @@ function renderPostEnding() {
   });
 
   const sorted = Object.keys(after)
-    .map(u => ({
-      user: u,
-      tasks: after[u].tasks,
-      ambient: after[u].ambient,
-      chapters: after[u].chapters,
-      days: after[u].days.size,
-      windowHrs: dataEnd ? (dataEnd - firstFinal[u]) / 3600000 : 0,
-    }))
+    .map(u => {
+      const own = after[u];
+      const combinedDays = new Set(own.days);
+      let repTasks = 0, repAmbient = 0, repChapters = 0;
+      const repIds = [];
+      (replaysOf[u] || []).forEach(rep => {
+        const f = fullActivity[rep];
+        if (!f) return;   // replay user filtered out of the current cohort
+        repTasks += f.tasks; repAmbient += f.ambient; repChapters += f.chapters;
+        f.days.forEach(d => combinedDays.add(d));
+        repIds.push(rep);
+      });
+      return {
+        user: u,
+        tasks: own.tasks + repTasks,
+        ownTasks: own.tasks,
+        replayTasks: repTasks,
+        ambient: own.ambient + repAmbient,
+        chapters: own.chapters + repChapters,
+        days: combinedDays.size,
+        replayIds: repIds,
+        windowHrs: dataEnd ? (dataEnd - firstFinal[u]) / 3600000 : 0,
+      };
+    })
     .sort((a, b) => b.tasks - a.tasks);
 
   if (!sorted.length) { destroyChart(id); return; }
@@ -2461,12 +2605,14 @@ function renderPostEnding() {
       afterBody: items => {
         const x = byUser[items[0].label];
         if (!x) return [];
-        return [
-          '',
-          `${x.ambient} patch · ${x.chapters} chapter re-listens`,
-          `${x.days} active ${x.days === 1 ? 'day' : 'days'} after the ending`,
-          `observed for ${fmtWindow(x.windowHrs)} after reaching it`,
-        ];
+        const lines = ['', `${x.ambient} patch · ${x.chapters} chapter re-listens`];
+        if (x.replayTasks) {
+          lines.push(`includes a full replay run (${x.replayIds.map(shortId).join(', ')}): ` +
+                     `${x.ownTasks} own + ${x.replayTasks} replay task events`);
+        }
+        lines.push(`${x.days} active ${x.days === 1 ? 'day' : 'days'} after the ending`);
+        lines.push(`observed for ${fmtWindow(x.windowHrs)} after reaching it`);
+        return lines;
       }
     }
   );
@@ -2537,6 +2683,146 @@ function renderPracticeNarrative() {
       }
     }
   );
+}
+
+// ---- chart: replay users, engagement across both runs ----
+// A replay user finished the story, reset, and started again under a new ID.
+// Each bar stacks the two runs so the total height is one person's whole
+// commitment — the strongest engagement signal there is, since they chose to do
+// the entire experience twice. Reads from filteredData like every other chart,
+// so a run is only shown while its user survives the active filters.
+function renderReplayEngagement() {
+  const id = 'chart-replay-engagement';
+
+  // The wrap keeps a stable id so an empty-state message and the canvas can be
+  // swapped in and out without disturbing the card's heading or toggle button.
+  const wrap = document.getElementById('chart-replay-wrap');
+  const emptyState = msg => {
+    destroyChart(id);
+    if (wrap) wrap.innerHTML = `<p class="empty">${msg}</p>`;
+  };
+
+  if (!replayPairs.size) {
+    emptyState('No replay users specified — add them in the filters bar.');
+    return;
+  }
+
+  // Restore the canvas if a prior empty state replaced it.
+  if (wrap && !document.getElementById(id)) {
+    wrap.innerHTML = `<canvas id="${id}"></canvas>`;
+  }
+
+  const facts = {};
+  filteredData.forEach(r => {
+    const user = r[cols.user];
+    if (!user) return;
+    const f = facts[user] || (facts[user] = { tasks: 0, days: new Set(), distinct: new Set() });
+    const dt = parseDate(r[cols.datetime]);
+    if (dt) f.days.add(localDayKey(dt));
+    const type = (r[cols.type] || '').toLowerCase();
+    if (type === 'task') f.tasks++;
+    else if (type.includes('chapter')) {
+      const m = (r[cols.entity] || '').match(/(\d+)/);
+      if (m) f.distinct.add(parseInt(m[1], 10));
+    }
+  });
+  const stat = u => facts[u] || { tasks: 0, days: new Set(), distinct: new Set() };
+
+  const rows = [];
+  replayPairs.forEach((original, replay) => {
+    const present = facts[replay] || (original && facts[original]);
+    if (!present) return;   // neither run survives the current filters
+    const o = stat(original), r = stat(replay);
+    rows.push({
+      label: original ? shortId(original) : shortId(replay),
+      original, replay,
+      firstTasks: original ? o.tasks : 0,
+      replayTasks: r.tasks,
+      firstDays: original ? o.days.size : 0,
+      replayDays: r.days.size,
+      firstDistinct: original ? o.distinct.size : 0,
+      replayDistinct: r.distinct.size,
+    });
+  });
+
+  if (!rows.length) {
+    emptyState('Replay users are specified, but none are present under the current filters.');
+    return;
+  }
+
+  rows.sort((a, b) => (b.firstTasks + b.replayTasks) - (a.firstTasks + a.replayTasks));
+
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: rows.map(x => x.label),
+      datasets: [
+        {
+          label: 'First run',
+          data: rows.map(x => x.firstTasks),
+          backgroundColor: PALETTE[0] + 'cc',
+          borderColor: PALETTE[0],
+          borderWidth: 1.5,
+          borderRadius: 4,
+        },
+        {
+          label: 'Replay run',
+          data: rows.map(x => x.replayTasks),
+          backgroundColor: PALETTE[1] + 'cc',
+          borderColor: PALETTE[1],
+          borderWidth: 1.5,
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, labels: { color: '#94a3b8', font: { size: 12 } } },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            title: items => 'Replay user ' + items[0].label,
+            label: c => ` ${c.dataset.label}: ${c.parsed.y} task events`,
+            afterBody: items => {
+              const x = rows[items[0].dataIndex];
+              const out = [
+                '',
+                `first run  ${shortId(x.original) || '—'}: ${x.firstDistinct} chapters, ${x.firstDays} active days`,
+                `replay run ${shortId(x.replay)}: ${x.replayDistinct} chapters, ${x.replayDays} active days`,
+                '',
+                `combined: ${x.firstTasks + x.replayTasks} task events over ${x.firstDays + x.replayDays} active days`,
+              ];
+              return out;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: 'Task events (both runs)', color: '#475569', font: { size: 11 } },
+        },
+      },
+    },
+  });
 }
 
 function renderDaysActive() {
