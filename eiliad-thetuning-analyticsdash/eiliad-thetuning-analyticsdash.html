@@ -424,6 +424,7 @@
     <div class="stat-card"><div class="label">Avg resonance ↑</div><div class="value" id="stat-resonance">—</div></div>
     <div class="stat-card"><div class="label">Date range</div><div class="value" style="font-size:15px;letter-spacing:-0.3px" id="stat-range">—</div></div>
     <div class="stat-card"><div class="label">DAU / MAU</div><div class="value" id="stat-dau-mau">—</div></div>
+    <div class="stat-card" title="Mean of every cohort user's task events per distinct chapter reached. Each user counts once, regardless of how much they played."><div class="label">Avg practice / chapter</div><div class="value" id="stat-practice-narrative">—</div></div>
     <div class="stat-card"><div class="label">Avg session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-len">—</div></div>
     <div class="stat-card"><div class="label">Median session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-median">—</div></div>
   </div>
@@ -448,18 +449,23 @@
           <div class="chart-wrap"><canvas id="chart-chapters-cumulative"></canvas></div>
         </div>
         <div class="chart-card">
+          <h3>Chapter Completions Eligible Cumulative</h3>
+          <p class="sub">As above, but also counts a user for chapters they had unlocked — the work is in the data even when the chapter event never arrived. Hover to see who was added</p>
+          <div class="chart-wrap"><canvas id="chart-chapters-eligible-cumulative"></canvas></div>
+        </div>
+        <div class="chart-card">
           <h3>Chapter Reach Rate</h3>
           <p class="sub">% of all users who reached each chapter</p>
           <div class="chart-wrap"><canvas id="chart-reach"></canvas></div>
         </div>
         <div class="chart-card">
           <h3>Drop-off Point</h3>
-          <p class="sub">Last chapter reached per user — where users stop progressing</p>
+          <p class="sub">Furthest chapter reached per user — where users stop progressing. Going back to re-listen doesn't count as dropping off</p>
           <div class="chart-wrap"><canvas id="chart-dropoff"></canvas></div>
         </div>
         <div class="chart-card">
           <h3>Chapter Re-entry Rate</h3>
-          <p class="sub">% of visitors who returned to each chapter more than once</p>
+          <p class="sub">% of visitors who returned to each chapter more than once — re-listening is deliberate use, so read this as engagement rather than as churn</p>
           <div class="chart-wrap"><canvas id="chart-reentry"></canvas></div>
         </div>
         <div class="chart-card">
@@ -570,6 +576,16 @@
           <h3>Days Active</h3>
           <p class="sub">Number of distinct active days per user</p>
           <div class="chart-wrap"><canvas id="chart-days-active"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Post-Ending Engagement</h3>
+          <p class="sub">Task events after a user's first final-chapter event — past the ending there's no story left to unlock, so anything they do is practice for its own sake. Counts only; hover for the observation window, which varies hugely</p>
+          <div class="chart-wrap"><canvas id="chart-post-ending"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Practice-to-Narrative Ratio</h3>
+          <p class="sub">Task events per distinct chapter reached, per user — high means the practice is the point, low means chapters are being collected. Re-entries don't count, so replaying a chapter isn't charged as more story</p>
+          <div class="chart-wrap"><canvas id="chart-practice-narrative"></canvas></div>
         </div>
         <div class="chart-card" style="grid-column: 1 / -1;">
           <h3>Time of Day — All Usage</h3>
@@ -1085,7 +1101,7 @@ function detectCheatUsers(data) {
     const dt = parseDate(r[cols.datetime]);
     if (!user || !dt) return;
     if (!userActiveDays[user]) userActiveDays[user] = new Set();
-    userActiveDays[user].add(dt.toISOString().slice(0, 10));
+    userActiveDays[user].add(localDayKey(dt));
   });
 
   // Highest chapter number each user has ever entered
@@ -1179,7 +1195,7 @@ function applyFilters() {
     if (typeQ && (row[cols.type] || '') !== typeQ) return false;
     if ((from || to) && cols.datetime) {
       const d = parseDate(row[cols.datetime]);
-      if (from && d && d < new Date(from)) return false;
+      if (from && d && d < new Date(from + 'T00:00:00')) return false;
       if (to   && d && d > new Date(to + 'T23:59:59')) return false;
     }
     return true;
@@ -1195,6 +1211,7 @@ function applyFilters() {
   // chapters
   renderChapters();
   renderChaptersCumulative();
+  renderChaptersEligibleCumulative();
   renderChapterReachRate();
   renderDropOff();
   renderReEntry();
@@ -1217,6 +1234,8 @@ function applyFilters() {
   // engagement
   renderActivityOverTime();
   renderDaysActive();
+  renderPostEnding();
+  renderPracticeNarrative();
   renderOverallTimeOfDay();
   renderResonanceOverTime();
   // streaks
@@ -1261,7 +1280,7 @@ const users = new Set(filteredData.map(r => r[cols.user]).filter(Boolean));
     openedEvents.forEach(r => {
       const user = r[cols.user], dt = parseDate(r[cols.datetime]);
       if (!user || !dt) return;
-      const day = dt.toISOString().slice(0, 10);
+      const day = localDayKey(dt);
       if (!dayUsers[day]) dayUsers[day] = new Set();
       dayUsers[day].add(user);
     });
@@ -1308,6 +1327,25 @@ const users = new Set(filteredData.map(r => r[cols.user]).filter(Boolean));
 }
 
 // ---- chart: chapters ----
+// Tooltip lists the users behind a bar. Capped because with the cohort filters
+// off a single chapter runs to ~180 users, which no tooltip can show usefully.
+const TOOLTIP_USER_CAP = 30;
+const TOOLTIP_USERS_PER_LINE = 3;
+
+function userListLines(users) {
+  if (!users || !users.size) return [];
+  const ids = [...users]
+    .map(u => (u.startsWith('USER-') ? u.slice(5) : u))
+    .sort();
+  const shown = ids.slice(0, TOOLTIP_USER_CAP);
+  const lines = [''];
+  for (let i = 0; i < shown.length; i += TOOLTIP_USERS_PER_LINE) {
+    lines.push(shown.slice(i, i + TOOLTIP_USERS_PER_LINE).join('   '));
+  }
+  if (ids.length > shown.length) lines.push(`…and ${ids.length - shown.length} more`);
+  return lines;
+}
+
 function renderChapters() {
   // Filter to chapter events
   const chapterEvents = filteredData.filter(r =>
@@ -1327,8 +1365,66 @@ function renderChapters() {
 
   renderBarChart('chart-chapters', labels, data,
     labels.map((_, i) => PALETTE[i % PALETTE.length]),
-    'Unique users'
+    'Unique users',
+    { afterBody: items => userListLines(byChapter[items[0].label]) }
   );
+}
+
+// ---- eligibility ----
+// A chapter event can go missing while the work that earned it is still in the
+// data: the client defers writes and flushes on next launch, so a crash loses
+// whatever was pending. USER-258HNL is the worked example — chapter 15 done,
+// 10 active days, resonance 100 (every recorded condition for chapter 16 met),
+// then their session never flushed and they have no chapter 16 event.
+//
+// Only the conditions the export actually records can be checked: day,
+// resonance, and nature. The other unlocks (persuasion, clairvoyance,
+// dreamweaving, slowTime, water, night) never appear as entities for any user,
+// so they cannot be verified and are skipped. That makes eligibility an upper
+// bound: a user can clear every check here and still have been held back by an
+// unlock this export cannot see.
+const STATE_COND_BY_ENTRY = (() => {
+  const m = {};
+  STATE_CONDITIONS.forEach(sc => { if (sc) m[sc.toEnterState] = sc.conditions || {}; });
+  return m;
+})();
+const MAX_STATE = STATE_CONDITIONS.reduce((m, sc) => (sc && sc.toEnterState > m ? sc.toEnterState : m), 0);
+
+function buildEligibilityFacts(data) {
+  const days = {}, maxRes = {}, didNature = {};
+  data.forEach(r => {
+    const user = r[cols.user];
+    if (!user) return;
+    const dt = parseDate(r[cols.datetime]);
+    if (dt) {
+      if (!days[user]) days[user] = new Set();
+      days[user].add(localDayKey(dt));
+    }
+    const res = parseFloat(r[cols.resonance]);
+    if (!isNaN(res) && (maxRes[user] === undefined || res > maxRes[user])) maxRes[user] = res;
+    if ((r[cols.type] || '').toLowerCase() === 'task' &&
+        (r[cols.entity] || '').toLowerCase() === 'nature') didNature[user] = true;
+  });
+  return { days, maxRes, didNature };
+}
+
+// Could `user` have entered `state`, given they completed the one before it?
+function meetsRecordedConditions(user, state, facts) {
+  const c = STATE_COND_BY_ENTRY[state];
+  if (!c) return false;
+  if (c.day && (facts.days[user] ? facts.days[user].size : 0) < c.day) return false;
+  if (c.resonance && (facts.maxRes[user] || 0) < c.resonance) return false;
+  if (c.nature && !facts.didNature[user]) return false;
+  return true;
+}
+
+// Walk up from the user's highest recorded chapter for as long as each next
+// chapter's recorded conditions are met, treating an unlocked chapter as taken
+// so the chain can continue (chapter 17 gates only on chapter 16 being done).
+function eligibleMaxChapter(user, maxCh, facts) {
+  let ch = maxCh;
+  while (ch < MAX_STATE && meetsRecordedConditions(user, ch + 1, facts)) ch++;
+  return ch;
 }
 
 // ---- chart: chapters, cumulative ----
@@ -1425,6 +1521,107 @@ function renderChaptersCumulative() {
   });
 }
 
+// ---- chart: chapters, eligible cumulative ----
+// Same cumulative rule as renderChaptersCumulative, but each user is counted up
+// to the furthest chapter they had unlocked rather than the furthest they were
+// recorded reaching. See the eligibility note above for what that can and
+// cannot be checked against.
+function renderChaptersEligibleCumulative() {
+  const id = 'chart-chapters-eligible-cumulative';
+  const chapterEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('chapter')
+  );
+
+  const userMaxChapter = {};
+  chapterEvents.forEach(r => {
+    const user = r[cols.user];
+    const m = (r[cols.entity] || '').match(/(\d+)/);
+    if (!user || !m) return;
+    const n = parseInt(m[1], 10);
+    if (!userMaxChapter[user] || n > userMaxChapter[user]) userMaxChapter[user] = n;
+  });
+
+  const facts = buildEligibilityFacts(filteredData);
+  const counts = new Array(MAX_STATE + 2).fill(0);
+  const addedBy = {};   // chapter -> users counted only because they were eligible
+  let highest = 0;
+
+  Object.entries(userMaxChapter).forEach(([user, maxCh]) => {
+    const eligibleMax = eligibleMaxChapter(user, maxCh, facts);
+    if (eligibleMax > highest) highest = eligibleMax;
+    for (let ch = 1; ch <= eligibleMax; ch++) {
+      counts[ch]++;
+      if (ch > maxCh) (addedBy[ch] = addedBy[ch] || new Set()).add(user);
+    }
+  });
+
+  if (!highest) { destroyChart(id); return; }
+
+  const labels = [];
+  const data   = [];
+  for (let ch = 1; ch <= highest; ch++) {
+    labels.push('chapter' + ch);
+    data.push(counts[ch]);
+  }
+
+  const totalUsers = new Set(filteredData.map(r => r[cols.user]).filter(Boolean)).size;
+  const pct = data.map(n => totalUsers ? +((n / totalUsers) * 100).toFixed(1) : 0);
+
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+
+  const bgColors = labels.map((_, i) => PALETTE[i % PALETTE.length]);
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: bgColors.map(c => c + 'cc'),
+        borderColor: bgColors,
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          borderColor: '#2e3248',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` ${c.parsed.y.toLocaleString()} users · ${pct[c.dataIndex]}% of ${totalUsers.toLocaleString()}`,
+            afterBody: items => {
+              const added = addedBy[items[0].dataIndex + 1];
+              if (!added || !added.size) return [];
+              return [`+${added.size} eligible, no chapter event:`].concat(userListLines(added));
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: 'Unique users', color: '#475569', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
 // ---- chart group: volume + resonance delta for a named entity set ----
 function renderGroupCharts(entityNames, volumeChartId, resonanceChartId, palette) {
   const taskEvents = activityRows.filter(r =>
@@ -1492,20 +1689,33 @@ function renderChapterReachRate() {
   renderBarChart('chart-reach', labels, data, labels.map((_,i) => PALETTE[i % PALETTE.length]), '% of users');
 }
 
+// Drop-off is where a user stopped progressing, which is the furthest chapter
+// they reached — not the last one they happened to open. Re-listening to an
+// earlier chapter is normal, deliberate use, so keying on the latest event by
+// timestamp read it as regression: ELDVJ2 finished the story, went back to
+// chapter 2, and was recorded as having dropped off at chapter 2.
 function renderDropOff() {
-  const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
-  const lastChapter = {};
-  chEvts.forEach(r => {
-    const user = r[cols.user], ch = r[cols.entity] || 'Unknown';
-    const dt = parseDate(r[cols.datetime]);
-    if (!dt) return;
-    if (!lastChapter[user] || dt >= lastChapter[user].dt) lastChapter[user] = { ch, dt };
+  const furthest = {};
+  filteredData.forEach(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
+    const user = r[cols.user];
+    const m = (r[cols.entity] || '').match(/(\d+)/);
+    if (!user || !m) return;
+    const n = parseInt(m[1], 10);
+    if (!furthest[user] || n > furthest[user]) furthest[user] = n;
   });
-  const counts = {};
-  Object.values(lastChapter).forEach(({ ch }) => { counts[ch] = (counts[ch] || 0) + 1; });
+
+  const counts = {}, usersAt = {};
+  Object.entries(furthest).forEach(([user, n]) => {
+    const ch = 'chapter' + n;
+    counts[ch] = (counts[ch] || 0) + 1;
+    (usersAt[ch] = usersAt[ch] || new Set()).add(user);
+  });
+
   const labels = Object.keys(counts).sort(naturalSort);
   renderBarChart('chart-dropoff', labels, labels.map(l => counts[l]),
-    labels.map((_,i) => PALETTE[i % PALETTE.length]), 'Users');
+    labels.map((_,i) => PALETTE[i % PALETTE.length]), 'Users',
+    { afterBody: items => userListLines(usersAt[items[0].label]) });
 }
 
 function renderReEntry() {
@@ -2162,9 +2372,9 @@ function renderActivityOverTime() {
     if (useWeeks) {
       const ws = new Date(dt);
       ws.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); // Monday
-      key = ws.toISOString().slice(0,10);
+      key = localDayKey(ws);
     } else {
-      key = dt.toISOString().slice(0,7);
+      key = localMonthKey(dt);
     }
     buckets[key] = (buckets[key] || 0) + 1;
   });
@@ -2173,13 +2383,162 @@ function renderActivityOverTime() {
   renderLineChart('chart-over-time', labels, labels.map(l => buckets[l]), PALETTE[0], 'Sessions');
 }
 
+// ---- chart: post-ending engagement ----
+// Activity after a user's first final-chapter event. Past the last chapter there
+// is no story left to unlock, so anything a user does is free of extrinsic pull
+// — the strongest available evidence that the app became a practice rather than
+// a narrative.
+//
+// Counts, never percentages: the cohort is tiny. Read them against the
+// observation window in the tooltip — someone who reached the ending two hours
+// before the export had no chance to accumulate anything, and a bar of 0 there
+// means nothing at all.
+//
+// A user who reached the ending but whose chapter event was lost to a crash
+// cannot appear here: with no event there is no moment to measure from. So this
+// cohort is a floor.
+function renderPostEnding() {
+  const id = 'chart-post-ending';
+  const firstFinal = {};
+  let dataEnd = null;
+
+  filteredData.forEach(r => {
+    const user = r[cols.user];
+    const dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    if (!dataEnd || dt > dataEnd) dataEnd = dt;
+    if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
+    const m = (r[cols.entity] || '').match(/(\d+)/);
+    if (!m || parseInt(m[1], 10) !== MAX_STATE) return;
+    if (!firstFinal[user] || dt < firstFinal[user]) firstFinal[user] = dt;
+  });
+
+  const after = {};
+  Object.keys(firstFinal).forEach(u => {
+    after[u] = { tasks: 0, ambient: 0, chapters: 0, days: new Set() };
+  });
+  filteredData.forEach(r => {
+    const user = r[cols.user];
+    const a = after[user];
+    if (!a) return;
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt || dt <= firstFinal[user]) return;
+    a.days.add(localDayKey(dt));
+    const type = (r[cols.type] || '').toLowerCase();
+    if (type === 'task') a.tasks++;
+    else if (type === 'patch') a.ambient++;
+    else if (type.includes('chapter')) a.chapters++;
+  });
+
+  const sorted = Object.keys(after)
+    .map(u => ({
+      user: u,
+      tasks: after[u].tasks,
+      ambient: after[u].ambient,
+      chapters: after[u].chapters,
+      days: after[u].days.size,
+      windowHrs: dataEnd ? (dataEnd - firstFinal[u]) / 3600000 : 0,
+    }))
+    .sort((a, b) => b.tasks - a.tasks);
+
+  if (!sorted.length) { destroyChart(id); return; }
+
+  const byUser = {};
+  sorted.forEach(x => { byUser[x.user] = x; });
+  const fmtWindow = h => (h < 48 ? `${h.toFixed(1)} hours` : `${(h / 24).toFixed(1)} days`);
+
+  renderBarChart(id,
+    sorted.map(x => x.user), sorted.map(x => x.tasks),
+    sorted.map((_, i) => PALETTE[i % PALETTE.length]), 'Task events after the ending',
+    {
+      afterBody: items => {
+        const x = byUser[items[0].label];
+        if (!x) return [];
+        return [
+          '',
+          `${x.ambient} patch · ${x.chapters} chapter re-listens`,
+          `${x.days} active ${x.days === 1 ? 'day' : 'days'} after the ending`,
+          `observed for ${fmtWindow(x.windowHrs)} after reaching it`,
+        ];
+      }
+    }
+  );
+}
+
+// ---- chart: practice-to-narrative ratio ----
+// Task events per distinct chapter reached, per user. Chapters are the reward,
+// tasks are the actual practice, so the ratio separates two populations that
+// look identical on the volume charts.
+//
+// The denominator is distinct chapters, not chapter events: a user who revisits
+// a chapter hasn't consumed any more story, so counting re-entries would charge
+// them a larger denominator for the same narrative and read them as less
+// practised than they are.
+//
+// Also sets the cohort average stat, since it has the per-user ratios in hand.
+function renderPracticeNarrative() {
+  const tasks = {}, distinctChapters = {};
+  filteredData.forEach(r => {
+    const user = r[cols.user];
+    if (!user) return;
+    const type = (r[cols.type] || '').toLowerCase();
+    if (type === 'task') {
+      tasks[user] = (tasks[user] || 0) + 1;
+    } else if (type.includes('chapter')) {
+      const m = (r[cols.entity] || '').match(/(\d+)/);
+      if (m) {
+        if (!distinctChapters[user]) distinctChapters[user] = new Set();
+        distinctChapters[user].add(parseInt(m[1], 10));
+      }
+    }
+  });
+
+  // A user with no chapter reached has no narrative to weigh the practice
+  // against, so there's no ratio to report.
+  const sorted = Object.keys(distinctChapters)
+    .map(u => {
+      const distinct = distinctChapters[u].size;
+      const count = tasks[u] || 0;
+      return { user: u, tasks: count, distinct, ratio: +(count / distinct).toFixed(2) };
+    })
+    .sort((a, b) => b.ratio - a.ratio);
+
+  const avgEl = document.getElementById('stat-practice-narrative');
+  if (avgEl) {
+    // Mean of the per-user ratios — each user counts once regardless of volume.
+    avgEl.textContent = sorted.length
+      ? (sorted.reduce((a, x) => a + x.tasks / x.distinct, 0) / sorted.length).toFixed(2)
+      : '—';
+  }
+
+  if (!sorted.length) { destroyChart('chart-practice-narrative'); return; }
+
+  const byUser = {};
+  sorted.forEach(x => { byUser[x.user] = x; });
+
+  renderBarChart('chart-practice-narrative',
+    sorted.map(x => x.user), sorted.map(x => x.ratio),
+    sorted.map((_, i) => PALETTE[i % PALETTE.length]), 'Tasks per chapter',
+    {
+      afterBody: items => {
+        const x = byUser[items[0].label];
+        if (!x) return [];
+        return [
+          '',
+          `${x.tasks} task events ÷ ${x.distinct} distinct chapters`,
+        ];
+      }
+    }
+  );
+}
+
 function renderDaysActive() {
   const userDays = {};
   filteredData.forEach(r => {
     const user = r[cols.user], dt = parseDate(r[cols.datetime]);
     if (!user || !dt) return;
     if (!userDays[user]) userDays[user] = new Set();
-    userDays[user].add(dt.toISOString().slice(0,10));
+    userDays[user].add(localDayKey(dt));
   });
   const sorted = Object.entries(userDays)
     .map(([u, days]) => ({ user: u, days: days.size }))
@@ -2209,7 +2568,7 @@ function renderResonanceOverTime() {
   } else {
     const byDay = {};
     events.forEach(r => {
-      const key = parseDate(r[cols.datetime]).toISOString().slice(0,10);
+      const key = localDayKey(parseDate(r[cols.datetime]));
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(parseFloat(r[cols.resonance]));
     });
@@ -2230,7 +2589,7 @@ function calcStreaksForEvents(events) {
     const user = r[cols.user], dt = parseDate(r[cols.datetime]);
     if (!user || !dt) return;
     if (!userDates[user]) userDates[user] = new Set();
-    userDates[user].add(dt.toISOString().slice(0, 10));
+    userDates[user].add(localDayKey(dt));
   });
 
   const results = {};
@@ -2317,9 +2676,9 @@ function renderActivityResonanceTrend() {
     if (useWeeks) {
       const ws = new Date(dt);
       ws.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
-      return ws.toISOString().slice(0, 10);
+      return localDayKey(ws);
     }
-    return dt.toISOString().slice(0, 7);
+    return localMonthKey(dt);
   }
 
   Object.values(sessions).forEach(({ activity, starts, ends }) => {
@@ -2559,7 +2918,8 @@ function renderLineChart(canvasId, labels, data, color, yLabel) {
   });
 }
 
-function renderBarChart(canvasId, labels, data, colors, yLabel) {
+// opts.afterBody: (tooltipItems) => string[] — extra lines under the tooltip value.
+function renderBarChart(canvasId, labels, data, colors, yLabel, opts = {}) {
   destroyChart(canvasId);
 
   if (!labels.length) {
@@ -2602,7 +2962,10 @@ function renderBarChart(canvasId, labels, data, colors, yLabel) {
           callbacks: {
             label: ctx => isMinuteLabel(yLabel)
               ? ` ${fmtMinsValue(ctx.parsed.y, yLabel)}`
-              : ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`
+              : ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`,
+            // Only set when supplied — an explicit undefined would clobber
+            // Chart.js's own default callback.
+            ...(opts.afterBody ? { afterBody: opts.afterBody } : {})
           }
         }
       },
@@ -2663,8 +3026,21 @@ function parseDate(val) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Calendar keys are built from local date parts. The export's timestamps are
+// bare wall-clock with no offset, so toISOString() would reinterpret them as
+// UTC and file anything before 01:00 BST under the previous day.
+function localDayKey(d) {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function localMonthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function fmtDateInput(d) {
-  return d.toISOString().slice(0, 10);
+  return localDayKey(d);
 }
 
 function naturalSort(a, b) {
@@ -2817,9 +3193,9 @@ function renderSessionCharts() {
     if (useWeeks) {
       const ws = new Date(s.start);
       ws.setDate(s.start.getDate() - ((s.start.getDay() + 6) % 7));
-      key = ws.toISOString().slice(0, 10);
+      key = localDayKey(ws);
     } else {
-      key = s.start.toISOString().slice(0, 7);
+      key = localMonthKey(s.start);
     }
     if (!timeBuckets[key]) timeBuckets[key] = [];
     timeBuckets[key].push(s.length);
@@ -2849,7 +3225,7 @@ function renderSessionCharts() {
   sessionData.forEach(s => {
     const ws = new Date(s.start);
     ws.setDate(s.start.getDate() - ((s.start.getDay() + 6) % 7));
-    const key = ws.toISOString().slice(0, 10);
+    const key = localDayKey(ws);
     weekBuckets[key] = (weekBuckets[key] || 0) + 1;
   });
   const wLabels = Object.keys(weekBuckets).sort();
@@ -2869,7 +3245,7 @@ function renderDAUMAU() {
   openedEvents.forEach(r => {
     const user = r[cols.user], dt = parseDate(r[cols.datetime]);
     if (!user || !dt) return;
-    const day = dt.toISOString().slice(0, 10);
+    const day = localDayKey(dt);
     if (!dayUsers[day]) dayUsers[day] = new Set();
     dayUsers[day].add(user);
   });
