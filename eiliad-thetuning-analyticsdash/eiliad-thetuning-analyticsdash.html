@@ -410,7 +410,7 @@
       <label title="Drives the AVERAGE SESSION DURATION and MEDIAN SESSION DURATION charts. Sessions longer than this are dropped. Default 360 (6h) keeps genuine long nature walks and deep listens, while excluding the 11-18h pairs left behind by missing end events. Set 0 for no cap.">Max session — average (mins)</label>
       <input type="number" id="filter-max-duration-avg" min="0" step="1" value="360" placeholder="0 = no cap">
     </div>
-    <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never reached chapter 1">Min Engagement</button>
+    <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never entered the story (no chapter events at all). A missing chapter 1 doesn't count against a user — that event can simply have been lost.">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
@@ -942,22 +942,29 @@ function getExcludedUsers() {
   const cohortAfter = document.getElementById('filter-cohort-after').value;
   const excluded = new Set(specificExclUsers);
 
-  // Exclude users whose total app engagement is below the minimum minutes,
-  // or who never reached chapter 1
+  // Exclude users whose total app engagement is below the minimum minutes, or
+  // who never entered the story at all.
+  //
+  // "Entered the story" means any chapter event, not a chapter 1 event
+  // specifically. A missing chapter 1 is not evidence someone never started:
+  // chapter events get dropped (see metric-suggestions.md), and a replay user
+  // begins a second run without re-logging chapter 1 — USER-2SZCGM reached
+  // chapter 14 across 373 minutes with no chapter 1 event and was being thrown
+  // out. Anyone who reached chapter 5 plainly passed through chapter 1, whether
+  // or not the event survived.
   engagementExcludedCount = 0;
   if (filterMinEngagement) {
     const thresh = parseFloat(document.getElementById('filter-min-engagement').value);
     const totals = computeUserEngagementMins(rawData);
-    const chapter1Users = new Set();
+    const storyUsers = new Set();
     rawData.forEach(r => {
       if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
-      const m = (r[cols.entity] || '').match(/(\d+)/);
-      if (m && parseInt(m[1], 10) === 1) chapter1Users.add(r[cols.user]);
+      if (r[cols.user]) storyUsers.add(r[cols.user]);
     });
     const allUsers = new Set(rawData.map(r => r[cols.user]).filter(Boolean));
     allUsers.forEach(u => {
       const belowMins = !isNaN(thresh) && thresh > 0 && (totals[u] || 0) < thresh;
-      if ((belowMins || !chapter1Users.has(u)) && !excluded.has(u)) {
+      if ((belowMins || !storyUsers.has(u)) && !excluded.has(u)) {
         excluded.add(u);
         engagementExcludedCount++;
       }
