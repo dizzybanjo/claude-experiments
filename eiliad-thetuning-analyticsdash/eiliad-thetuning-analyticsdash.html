@@ -388,6 +388,27 @@
       <div id="excl-user-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
     </div>
     <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
+      <label>Show only specific users <span style="color:var(--muted); font-weight:400;">&mdash; empty = everyone; otherwise the whole dashboard is limited to this set</span></label>
+    </div>
+    <div class="field-group" style="flex: 2; min-width: 280px;">
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="user-input-wrap" style="flex:1; min-width:160px;">
+          <span class="user-prefix">USER-</span>
+          <input type="text" id="filter-include-user-input" placeholder="type ID…" list="include-user-datalist">
+        </div>
+        <button class="btn btn-ghost" id="include-user-add-btn" style="white-space:nowrap; flex-shrink:0; padding:8px 12px;">+ Add</button>
+        <span style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; white-space:nowrap;">
+          no progress/activity in
+          <input type="number" id="filter-stall-days" value="7" min="1" step="1" style="width:52px; padding:6px 6px;">
+          days
+        </span>
+        <button class="btn btn-ghost" id="isolate-stalled-btn" style="white-space:nowrap; flex-shrink:0; padding:8px 12px;" title="Fill the list with stalled users — reached a chapter (but not chapter 17) and no chapter or activity event within the last X days of the snapshot, within the currently active filters">Isolate stalled</button>
+        <button class="btn btn-ghost" id="include-clear-btn" style="white-space:nowrap; flex-shrink:0; padding:8px 12px; display:none;">Clear</button>
+      </div>
+      <datalist id="include-user-datalist"></datalist>
+      <div id="include-user-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+    </div>
+    <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
       <label title="A user who finished chapter 17 and hit reset starts a fresh run under a NEW user ID; the app doesn't log the link. Enter it as replay=original (e.g. 2SZCGM=ELDVJ2) to join the two runs as one person.">Replay users &mdash; second run after a reset (replay=original)</label>
     </div>
     <div class="field-group" style="flex: 2; min-width: 280px;">
@@ -496,6 +517,66 @@
           <h3>Time of Day — Chapters</h3>
           <p class="sub">Events per hour of day for each chapter</p>
           <div class="chart-wrap" style="height:320px;"><canvas id="chart-chap-time-of-day"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Velocity -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Velocity</span>
+        <span class="section-tags">pace through the chapters · projection to chapter 17</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Chapters per Day — Distribution</h3>
+          <p class="sub">Each user's pace = chapters advanced ÷ days from their first to last chapter event (span floored at 1 day). Across all users — mean <b><span id="velocity-mean">—</span></b>, median <b><span id="velocity-median">—</span></b> chapters/day</p>
+          <div class="chart-wrap"><canvas id="chart-velocity-dist"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>How Soon Users Reach Chapter 17</h3>
+          <p class="sub">Cumulative — at each projected day, the share of users who would have reached chapter 17 if they held their current pace. Milestones: <b><span id="velocity-p5">—</span></b> by 5d · <b><span id="velocity-p10">—</span></b> by 10d · <b><span id="velocity-p15">—</span></b> by 15d · <b><span id="velocity-p30">—</span></b> by 30d</p>
+          <div class="chart-wrap"><canvas id="chart-velocity-projection"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Stall Point</h3>
+          <p class="sub">Where the stalled cohort is stuck — the highest chapter each stalled user reached. Stalled = no chapter or activity event in <b><span id="stall-point-days">7</span></b> days (set beside the Isolate stalled button) and not yet at chapter 17. <span id="stall-point-total"></span>. Hover a bar for the users</p>
+          <div class="chart-wrap" style="height:300px;"><canvas id="chart-stall-point"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Chapters per Day — Per User</h3>
+          <p class="sub">Every user's pace, ranked fastest to slowest. Hover any bar for the user, their current chapter, active span and projected days to chapter 17</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-velocity-users"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Velocity -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Activity Velocity</span>
+        <span class="section-tags">how often users practise · breathing · meditation · nature · deep listening · rain · stargazing</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Activities per Day — Distribution</h3>
+          <p class="sub">Each user's rate = activity sessions started ÷ days from their first to last activity (span floored at 1 day). Across all users — mean <b><span id="act-vel-day-mean">—</span></b>, median <b><span id="act-vel-day-median">—</span></b> per day</p>
+          <div class="chart-wrap"><canvas id="chart-act-vel-day"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Activities per Week — Distribution</h3>
+          <p class="sub">The same rate expressed weekly (per-day × 7) — easier to read at human cadence. Across all users — mean <b><span id="act-vel-week-mean">—</span></b>, median <b><span id="act-vel-week-median">—</span></b> per week</p>
+          <div class="chart-wrap"><canvas id="chart-act-vel-week"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Activities per Day — Per User</h3>
+          <p class="sub">Every user's daily practice rate, ranked. Hover for the user, their total activities, active span and weekly rate</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-act-vel-day-users"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Activities per Week — Per User</h3>
+          <p class="sub">Every user's weekly practice rate, ranked. Same ordering as the daily view — this is the daily rate scaled to a week</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-act-vel-week-users"></canvas></div>
         </div>
       </div>
     </div>
@@ -904,6 +985,9 @@ function resetAll() {
   rawData = []; filteredData = []; sessionData = [];
   specificExclUsers.clear();
   saveExclUsers();
+  includeOnlyUsers.clear();
+  saveIncludeUsers();
+  renderIncludeTags();
   fileInput.value = '';
   uploadZone.style.display = '';
   document.getElementById('file-badge').classList.remove('visible');
@@ -952,6 +1036,138 @@ function addExclUser(suffix) {
   renderExclTags();
   document.getElementById('filter-excl-user-input').value = '';
   applyFilters();
+}
+
+// ---- include-only (allow-list) users ----
+// When non-empty, every chart is restricted to exactly this set. Empty = the
+// normal "everyone (minus exclusions)" behaviour. Persisted like the exclusions,
+// and the visible tags keep it discoverable across reloads.
+const INCLUDE_USERS_KEY = 'eiliad_include_users';
+let includeOnlyUsers = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem(INCLUDE_USERS_KEY) || '[]')); }
+  catch (e) { return new Set(); }
+})();
+
+function saveIncludeUsers() {
+  localStorage.setItem(INCLUDE_USERS_KEY, JSON.stringify([...includeOnlyUsers]));
+}
+
+function renderIncludeTags() {
+  const container = document.getElementById('include-user-tags');
+  const clearBtn  = document.getElementById('include-clear-btn');
+  if (clearBtn) clearBtn.style.display = includeOnlyUsers.size ? '' : 'none';
+  if (!container) return;
+  container.innerHTML = '';
+  includeOnlyUsers.forEach(u => {
+    const suffix = u.startsWith('USER-') ? u.slice(5) : u;
+    const tag = document.createElement('span');
+    tag.className = 'excl-tag';
+    tag.innerHTML = `USER-${suffix} <span class="remove" data-user="${u}">&times;</span>`;
+    tag.querySelector('.remove').addEventListener('click', () => {
+      includeOnlyUsers.delete(u);
+      saveIncludeUsers();
+      renderIncludeTags();
+      applyFilters();
+    });
+    container.appendChild(tag);
+  });
+}
+
+function addIncludeUser(suffix) {
+  if (!suffix) return;
+  const full = suffix.startsWith('USER-') ? suffix : 'USER-' + suffix;
+  includeOnlyUsers.add(full);
+  saveIncludeUsers();
+  renderIncludeTags();
+  document.getElementById('filter-include-user-input').value = '';
+  applyFilters();
+}
+
+function clearIncludeUsers() {
+  includeOnlyUsers.clear();
+  saveIncludeUsers();
+  renderIncludeTags();
+  applyFilters();
+}
+
+// Stalled = reached the story but gone quiet. A user is stalled when, in the
+// last X days before the snapshot (the dataset's latest timestamp), they have
+// touched neither a chapter nor an activity (breathing / meditation / nature /
+// Deep Listening). Any chapter event counts as engagement — including
+// re-listening one already reached — as does any activity; only bare app-opens
+// are ignored. So someone gated on a chapter who keeps practising or
+// re-listening stays off the list, while someone who's dropped both shows up.
+// Finishers (chapter 17) are excluded — they stopped because they're done.
+//
+// Honours the same cohort exclusions the dashboard applies (specific /
+// registration excludes, cheat-dev, min-engagement) so it reflects the default
+// cohort; ignores the event-type lens and the include-list itself.
+function getStallDays() {
+  const v = parseFloat(document.getElementById('filter-stall-days').value);
+  return isNaN(v) || v < 1 ? 7 : v;
+}
+
+// Snapshot = latest event timestamp across the whole export (the "as of" date
+// the stall recency is measured against).
+function computeSnapshot() {
+  let s = null;
+  rawData.forEach(r => {
+    const d = parseDate(r[cols.datetime]);
+    if (d && (!s || d > s)) s = d;
+  });
+  return s;
+}
+
+// Given a set of rows, return the stalled users as [{ user, chapter }] — where
+// `chapter` is the highest chapter they reached (their stall point). Any chapter
+// or activity event counts as engagement; bare app-opens don't. Finishers
+// (chapter 17) are excluded.
+function stalledRecords(rows, snapshot, X) {
+  if (!snapshot) return [];
+  const cutoff = new Date(snapshot.getTime() - X * 86400000);
+  const maxCh = {}, lastEngage = {}, hasChapter = new Set();
+  rows.forEach(r => {
+    const u = r[cols.user];
+    if (!u) return;
+    const cat = (r[cols.type] || '').toLowerCase();
+    const dt  = parseDate(r[cols.datetime]);
+    const isChapter  = cat.includes('chapter');
+    const isActivity = cat.includes('task') ||
+      (cat === 'patch' && (r[cols.entity] || '').toLowerCase() === 'ambient');
+    if (!isChapter && !isActivity) return;                   // ignore app-opens etc.
+
+    if (isChapter) {
+      const m = (r[cols.entity] || '').match(/(\d+)/);
+      if (!m) return;
+      hasChapter.add(u);
+      const n = parseInt(m[1], 10);
+      if (!maxCh[u] || n > maxCh[u]) maxCh[u] = n;
+    }
+    if (dt && (!lastEngage[u] || dt > lastEngage[u])) lastEngage[u] = dt;
+  });
+
+  const out = [];
+  hasChapter.forEach(u => {
+    if (maxCh[u] < CHAPTER_TARGET && lastEngage[u] && lastEngage[u] < cutoff) {
+      out.push({ user: u, chapter: maxCh[u] });
+    }
+  });
+  return out;
+}
+
+// The stalled cohort for the Isolate button: same cohort exclusions the
+// dashboard applies (specific / registration excludes, cheat-dev, min-
+// engagement), but ignoring the event-type lens and the include-list itself.
+function stalledUsersInCohort() {
+  const excludedUsers = getExcludedUsers();
+  const cheats = filterCheatDev ? detectCheatUsers(rawData) : new Set();
+  const rows = rawData.filter(r => {
+    const u = r[cols.user];
+    if (!u || excludedUsers.has(u)) return false;
+    if (filterCheatDev && cheats.has(u)) return false;
+    return true;
+  });
+  return stalledRecords(rows, computeSnapshot(), getStallDays()).map(r => r.user);
 }
 
 // ---- replay users ----
@@ -1093,15 +1309,17 @@ function updateUserDropdown(excludedUsers) {
     datalist.appendChild(o);
   });
 
-  if (exclDatalist) {
-    exclDatalist.innerHTML = '';
+  const incDatalist = document.getElementById('include-user-datalist');
+  [exclDatalist, incDatalist].forEach(dl => {
+    if (!dl) return;
+    dl.innerHTML = '';
     sortedUsers.forEach(u => {
       const suffix = u.startsWith('USER-') ? u.slice(5) : u;
       const o = document.createElement('option');
       o.value = suffix;
-      exclDatalist.appendChild(o);
+      dl.appendChild(o);
     });
-  }
+  });
 
   if (prev && excludedUsers.has('USER-' + prev)) input.value = '';
 }
@@ -1110,6 +1328,7 @@ function updateUserDropdown(excludedUsers) {
 function setupFilters() {
   updateUserDropdown(new Set());
   renderReplayTags();
+  renderIncludeTags();
 
   // populate type filter
   const types = [...new Set(rawData.map(r => r[cols.type]).filter(Boolean))].sort();
@@ -1135,6 +1354,26 @@ document.getElementById('excl-user-add-btn').addEventListener('click', () => {
 });
 document.getElementById('filter-excl-user-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); addExclUser(e.target.value.trim()); }
+});
+
+document.getElementById('include-user-add-btn').addEventListener('click', () => {
+  addIncludeUser(document.getElementById('filter-include-user-input').value.trim());
+});
+document.getElementById('filter-include-user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addIncludeUser(e.target.value.trim()); }
+});
+document.getElementById('include-clear-btn').addEventListener('click', clearIncludeUsers);
+// X changes the stall definition — re-render so the Stall Point chart updates live.
+document.getElementById('filter-stall-days').addEventListener('input', () => {
+  if (rawData.length) renderStallPoint();
+});
+document.getElementById('isolate-stalled-btn').addEventListener('click', () => {
+  const stalled = stalledUsersInCohort();
+  if (!stalled.length) { alert(`No stalled users in the current cohort (no chapter advancement or activity in the last ${getStallDays()} days, excluding finishers).`); return; }
+  includeOnlyUsers = new Set(stalled);
+  saveIncludeUsers();
+  renderIncludeTags();
+  applyFilters();
 });
 
 document.getElementById('replay-add-btn').addEventListener('click', () => {
@@ -1171,6 +1410,9 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   specificExclUsers.clear();
   saveExclUsers();
   renderExclTags();
+  includeOnlyUsers.clear();
+  saveIncludeUsers();
+  renderIncludeTags();
   filterAlpha = false;
   document.getElementById('filter-alpha-btn').classList.remove('active');
   filterMinEngagement = true;
@@ -1288,6 +1530,7 @@ function applyFilters() {
 
   filteredData = rawData.filter(row => {
     if (excludedUsers.has(row[cols.user])) return false;
+    if (includeOnlyUsers.size && !includeOnlyUsers.has(row[cols.user])) return false;
     if (filterCheatDev && detectedCheats.has(row[cols.user])) return false;
     if (userQ && row[cols.user] !== userQ) return false;
     if (typeQ && (row[cols.type] || '') !== typeQ) return false;
@@ -1316,6 +1559,12 @@ function applyFilters() {
   renderResonanceByChapter();
   renderChapterResonanceSurplus();
   renderChapterTimeOfDay();
+  // velocity
+  renderVelocityDistribution();
+  renderVelocityProjection();
+  renderStallPoint();
+  renderVelocityPerUser();
+  renderActivityVelocity();
   // activities
   renderGroupCharts(ACTIVITIES, 'chart-act-volume', 'chart-act-resonance',
     [PALETTE[0], PALETTE[1], PALETTE[2]]);
@@ -1467,6 +1716,421 @@ function renderChapters() {
     'Unique users',
     { afterBody: items => userListLines(byChapter[items[0].label]) }
   );
+}
+
+// ---- velocity ----
+// Pace through the story = chapters advanced per day. A user "began" at chapter
+// 1, so chapters advanced = maxChapter - 1, measured over the span from their
+// first to last chapter event. The span is floored at 1 day so a user who
+// binged several chapters in a single session doesn't read as an infinite rate.
+const CHAPTER_TARGET = 17;
+
+function computeUserVelocities(data) {
+  const rec = {};
+  data.forEach(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
+    const user = r[cols.user];
+    const m = (r[cols.entity] || '').match(/(\d+)/);
+    if (!user || !m) return;
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    const n = parseInt(m[1], 10);
+    const e = rec[user] || (rec[user] = { first: dt, last: dt, maxCh: 0 });
+    if (dt < e.first) e.first = dt;
+    if (dt > e.last)  e.last  = dt;
+    if (n > e.maxCh)  e.maxCh = n;
+  });
+
+  return Object.entries(rec).map(([user, e]) => {
+    const spanDays   = (e.last - e.first) / 86400000;
+    const elapsed    = Math.max(spanDays, 1);
+    const progressed = e.maxCh - 1;
+    const velocity   = progressed > 0 ? progressed / elapsed : 0;
+    const remaining  = CHAPTER_TARGET - e.maxCh;
+    // Days to reach chapter 17 at current pace; 0 if already there, Infinity if stalled.
+    const daysToTarget = remaining <= 0 ? 0 : (velocity > 0 ? remaining / velocity : Infinity);
+    return { user, maxCh: e.maxCh, spanDays, velocity, daysToTarget };
+  });
+}
+
+// Bins for the pace distribution. First bucket is "stuck at chapter 1" (never
+// progressed past chapter 1); the rest are chapters/day bands.
+const VELOCITY_BINS = [
+  { label: 'stuck at ch.1', lo: -Infinity, hi: 0 }, // velocity === 0
+  { label: '0–0.25',  lo: 0,    hi: 0.25 },
+  { label: '0.25–0.5',lo: 0.25, hi: 0.5 },
+  { label: '0.5–1',   lo: 0.5,  hi: 1 },
+  { label: '1–2',     lo: 1,    hi: 2 },
+  { label: '2–4',     lo: 2,    hi: 4 },
+  { label: '4+',      lo: 4,    hi: Infinity },
+];
+
+function renderVelocityDistribution() {
+  const vels = computeUserVelocities(filteredData);
+
+  // headline mean / median across all users with chapter data
+  const meanEl = document.getElementById('velocity-mean');
+  const medEl  = document.getElementById('velocity-median');
+  if (vels.length) {
+    const vs   = vels.map(v => v.velocity);
+    const mean = vs.reduce((a, b) => a + b, 0) / vs.length;
+    const sorted = [...vs].sort((a, b) => a - b);
+    const mid  = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    if (meanEl) meanEl.textContent = mean.toFixed(2);
+    if (medEl)  medEl.textContent  = median.toFixed(2);
+  } else {
+    if (meanEl) meanEl.textContent = '—';
+    if (medEl)  medEl.textContent  = '—';
+  }
+
+  // bucket users
+  const buckets = VELOCITY_BINS.map(() => new Set());
+  vels.forEach(v => {
+    if (v.velocity === 0) { buckets[0].add(v.user); return; }
+    for (let i = 1; i < VELOCITY_BINS.length; i++) {
+      const b = VELOCITY_BINS[i];
+      if (v.velocity > b.lo && v.velocity <= b.hi) { buckets[i].add(v.user); break; }
+    }
+  });
+
+  const labels = VELOCITY_BINS.map(b => b.label);
+  const counts = buckets.map(s => s.size);
+  const total  = vels.length;
+  const data   = counts.map(n => total ? +((n / total) * 100).toFixed(1) : 0);
+  renderBarChart('chart-velocity-dist', labels, data,
+    labels.map((_, i) => PALETTE[i % PALETTE.length]),
+    '% of users',
+    {
+      yTickSuffix: '%',
+      tooltipLabel: ctx => ` ${ctx.parsed.y}% (${counts[ctx.dataIndex].toLocaleString()} user${counts[ctx.dataIndex] === 1 ? '' : 's'})`,
+      afterBody: items => userListLines(buckets[items[0].dataIndex]),
+    }
+  );
+}
+
+// Cumulative curve: for each projected day, how many users would have reached
+// chapter 17 by then at their current pace. Plateau below 100% = users stalled
+// or moving too slowly to arrive within the horizon.
+function renderVelocityProjection() {
+  const vels = computeUserVelocities(filteredData);
+  const total = vels.length;
+  // Horizon runs to the last user who ever arrives (so the curve reaches its
+  // plateau), but never past a sane ceiling if someone is crawling.
+  const maxFinite = vels.reduce((m, v) => isFinite(v.daysToTarget) && v.daysToTarget > m ? v.daysToTarget : m, 0);
+  const CAP = Math.min(180, Math.max(30, Math.ceil(maxFinite)));
+
+  const pctBy = d => total
+    ? (vels.filter(v => v.daysToTarget <= d).length / total) * 100
+    : 0;
+
+  // milestone read-outs in the subtitle
+  [[5, 'velocity-p5'], [10, 'velocity-p10'], [15, 'velocity-p15'], [30, 'velocity-p30']]
+    .forEach(([d, id]) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = total ? pctBy(d).toFixed(0) + '%' : '—';
+    });
+
+  const labels = [];
+  const data   = [];
+  for (let d = 0; d <= CAP; d++) {
+    labels.push(d);
+    data.push(total ? +((vels.filter(v => v.daysToTarget <= d).length / total) * 100).toFixed(1) : 0);
+  }
+
+  destroyChart('chart-velocity-projection');
+  const ctx = document.getElementById('chart-velocity-projection');
+  if (!ctx || !total) { if (ctx && !total) renderBarChart('chart-velocity-projection', [], [], PALETTE, 'Users'); return; }
+
+  charts['chart-velocity-projection'] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: PALETTE[1],
+        backgroundColor: PALETTE[1] + '22',
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        fill: true,
+        tension: 0.2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            title: items => `Within ${items[0].label} day${items[0].label === '1' ? '' : 's'}`,
+            label: c => ` ${c.parsed.y}% of users (${Math.round(c.parsed.y / 100 * total)})`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12,
+              callback: function(v) { return this.getLabelForValue(v) + 'd'; } },
+             grid: { color: '#1e2235' },
+             title: { display: true, text: 'Projected days', color: '#475569', font: { size: 11 } } },
+        y: { beginAtZero: true, max: 100,
+             ticks: { color: '#64748b', font: { size: 12 }, callback: v => v + '%' },
+             grid: { color: '#1e2235' },
+             title: { display: true, text: '% of users reached ch.17', color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+// Every user's pace, ranked fastest → slowest. 195-odd bars, so the x axis is
+// left unlabelled and the user is revealed on hover.
+function renderVelocityPerUser() {
+  const vels = computeUserVelocities(filteredData)
+    .sort((a, b) => b.velocity - a.velocity);
+
+  const labels = vels.map(v => shortId(v.user));
+  const data   = vels.map(v => +v.velocity.toFixed(3));
+
+  destroyChart('chart-velocity-users');
+  const ctx = document.getElementById('chart-velocity-users');
+  if (!ctx) return;
+  if (!vels.length) { renderBarChart('chart-velocity-users', [], [], PALETTE, 'Chapters/day'); return; }
+
+  const fmtDays = d => d === 0 ? 'already there' : (isFinite(d) ? `${d.toFixed(1)} days` : 'not on track');
+
+  charts['chart-velocity-users'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: PALETTE[0] + 'cc',
+        borderColor: PALETTE[0],
+        borderWidth: 1,
+        borderRadius: 2,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            title: items => 'USER-' + items[0].label,
+            label: c => ` ${c.parsed.y} chapters/day`,
+            afterBody: items => {
+              const v = vels[items[0].dataIndex];
+              return [
+                `Current chapter: ${v.maxCh}`,
+                `Active span: ${v.spanDays < 1 ? '<1' : v.spanDays.toFixed(1)} days`,
+                `To chapter 17: ${fmtDays(v.daysToTarget)}`,
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { display: false }, grid: { display: false },
+             title: { display: true, text: `${vels.length} users, ranked`, color: '#475569', font: { size: 11 } } },
+        y: { beginAtZero: true,
+             ticks: { color: '#64748b', font: { size: 12 } },
+             grid: { color: '#1e2235' },
+             title: { display: true, text: 'Chapters/day', color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+// ---- stall point ----
+// Where the stalled cohort is stuck: the highest chapter each stalled user
+// reached. Uses the same recency rule as the Isolate button (X days, re-listens
+// and activities count, finishers excluded), computed over the current
+// filteredData so it respects every active filter and the include-list.
+function renderStallPoint() {
+  const recs = stalledRecords(filteredData, computeSnapshot(), getStallDays());
+
+  const daysEl  = document.getElementById('stall-point-days');
+  const totalEl = document.getElementById('stall-point-total');
+  if (daysEl)  daysEl.textContent  = getStallDays();
+  if (totalEl) totalEl.textContent = recs.length
+    ? `${recs.length} stalled user${recs.length === 1 ? '' : 's'}`
+    : 'no stalled users';
+
+  const byChapter = {};
+  recs.forEach(r => { (byChapter[r.chapter] = byChapter[r.chapter] || new Set()).add(r.user); });
+
+  // Contiguous 1..highest stall chapter, so interior chapters with no stalls
+  // still show as gaps and the funnel shape reads cleanly.
+  const maxStall = recs.reduce((m, r) => Math.max(m, r.chapter), 0);
+  if (!maxStall) { renderBarChart('chart-stall-point', [], [], PALETTE, '% of stalled users'); return; }
+
+  const chapters = [];
+  for (let c = 1; c <= maxStall; c++) chapters.push(c);
+  const labels = chapters.map(c => 'chapter' + c);
+  const counts = chapters.map(c => (byChapter[c] ? byChapter[c].size : 0));
+  const total  = recs.length;
+  const data   = counts.map(n => total ? +((n / total) * 100).toFixed(1) : 0);
+
+  renderBarChart('chart-stall-point', labels, data,
+    labels.map((_, i) => PALETTE[i % PALETTE.length]),
+    '% of stalled users',
+    {
+      yTickSuffix: '%',
+      tooltipLabel: ctx => ` ${ctx.parsed.y}% (${counts[ctx.dataIndex]} user${counts[ctx.dataIndex] === 1 ? '' : 's'})`,
+      afterBody: items => userListLines(byChapter[chapters[items[0].dataIndex]]),
+    }
+  );
+}
+
+// ---- activity velocity ----
+// How often users practise. An "activity" is a task-category start event, drawn
+// from activityRows so Deep Listening (ambient) is included alongside the real
+// task rows. Rate = sessions started ÷ span (first→last activity), floored at
+// 1 day; the weekly rate is the same figure × 7.
+function computeUserActivityRates() {
+  const rec = {};
+  activityRows.forEach(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('task')) return;
+    if (!isStartAction(r[cols.action] || '')) return;
+    const user = r[cols.user];
+    const dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    const e = rec[user] || (rec[user] = { first: dt, last: dt, count: 0 });
+    if (dt < e.first) e.first = dt;
+    if (dt > e.last)  e.last  = dt;
+    e.count++;
+  });
+  return Object.entries(rec).map(([user, e]) => {
+    const spanDays = (e.last - e.first) / 86400000;
+    const perDay   = e.count / Math.max(spanDays, 1);
+    return { user, count: e.count, spanDays, perDay, perWeek: perDay * 7 };
+  });
+}
+
+const ACT_DAY_BINS = [
+  { label: '0–1',   lo: -Infinity, hi: 1 },
+  { label: '1–2',   lo: 1,  hi: 2 },
+  { label: '2–4',   lo: 2,  hi: 4 },
+  { label: '4–7',   lo: 4,  hi: 7 },
+  { label: '7–12',  lo: 7,  hi: 12 },
+  { label: '12–20', lo: 12, hi: 20 },
+  { label: '20+',   lo: 20, hi: Infinity },
+];
+const ACT_WEEK_BINS = [
+  { label: '0–7',    lo: -Infinity, hi: 7 },
+  { label: '7–14',   lo: 7,   hi: 14 },
+  { label: '14–28',  lo: 14,  hi: 28 },
+  { label: '28–50',  lo: 28,  hi: 50 },
+  { label: '50–84',  lo: 50,  hi: 84 },
+  { label: '84–140', lo: 84,  hi: 140 },
+  { label: '140+',   lo: 140, hi: Infinity },
+];
+
+// Histogram of a per-user rate, with mean/median written into the subtitle.
+function renderRateHistogram(canvasId, records, key, bins, meanId, medId, decimals = 1) {
+  const meanEl = document.getElementById(meanId);
+  const medEl  = document.getElementById(medId);
+  if (records.length) {
+    const vs   = records.map(r => r[key]);
+    const mean = vs.reduce((a, b) => a + b, 0) / vs.length;
+    const s    = [...vs].sort((a, b) => a - b);
+    const m    = Math.floor(s.length / 2);
+    const median = s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    if (meanEl) meanEl.textContent = mean.toFixed(decimals);
+    if (medEl)  medEl.textContent  = median.toFixed(decimals);
+  } else {
+    if (meanEl) meanEl.textContent = '—';
+    if (medEl)  medEl.textContent  = '—';
+  }
+
+  const buckets = bins.map(() => new Set());
+  records.forEach(r => {
+    const v = r[key];
+    for (let i = 0; i < bins.length; i++) {
+      if (v > bins[i].lo && v <= bins[i].hi) { buckets[i].add(r.user); break; }
+    }
+  });
+  const counts = buckets.map(s => s.size);
+  const total  = records.length;
+  const data   = counts.map(n => total ? +((n / total) * 100).toFixed(1) : 0);
+  renderBarChart(canvasId, bins.map(b => b.label), data,
+    bins.map((_, i) => PALETTE[i % PALETTE.length]), '% of users',
+    {
+      yTickSuffix: '%',
+      tooltipLabel: ctx => ` ${ctx.parsed.y}% (${counts[ctx.dataIndex].toLocaleString()} user${counts[ctx.dataIndex] === 1 ? '' : 's'})`,
+      afterBody: items => userListLines(buckets[items[0].dataIndex]),
+    });
+}
+
+// Per-user ranked bars for a rate. Labels hidden (too many users); user + detail
+// on hover.
+function renderRatePerUser(canvasId, records, key, yLabel, color) {
+  const sorted = [...records].sort((a, b) => b[key] - a[key]);
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  if (!sorted.length) { renderBarChart(canvasId, [], [], PALETTE, yLabel); return; }
+
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(r => shortId(r.user)),
+      datasets: [{
+        data: sorted.map(r => +r[key].toFixed(2)),
+        backgroundColor: color + 'cc',
+        borderColor: color,
+        borderWidth: 1,
+        borderRadius: 2,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            title: items => 'USER-' + items[0].label,
+            label: c => ` ${c.parsed.y} ${yLabel}`,
+            afterBody: items => {
+              const r = sorted[items[0].dataIndex];
+              return [
+                `Total activities: ${r.count}`,
+                `Active span: ${r.spanDays < 1 ? '<1' : r.spanDays.toFixed(1)} days`,
+                `Per day ${r.perDay.toFixed(1)} · per week ${r.perWeek.toFixed(1)}`,
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { display: false }, grid: { display: false },
+             title: { display: true, text: `${sorted.length} users, ranked`, color: '#475569', font: { size: 11 } } },
+        y: { beginAtZero: true,
+             ticks: { color: '#64748b', font: { size: 12 } },
+             grid: { color: '#1e2235' },
+             title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function renderActivityVelocity() {
+  const rates = computeUserActivityRates();
+  renderRateHistogram('chart-act-vel-day',  rates, 'perDay',  ACT_DAY_BINS,  'act-vel-day-mean',  'act-vel-day-median');
+  renderRateHistogram('chart-act-vel-week', rates, 'perWeek', ACT_WEEK_BINS, 'act-vel-week-mean', 'act-vel-week-median');
+  renderRatePerUser('chart-act-vel-day-users',  rates, 'perDay',  'Activities/day',  PALETTE[2]);
+  renderRatePerUser('chart-act-vel-week-users', rates, 'perWeek', 'Activities/week', PALETTE[5]);
 }
 
 // ---- eligibility ----
@@ -3253,9 +3917,13 @@ function renderBarChart(canvasId, labels, data, colors, yLabel, opts = {}) {
           titleColor: '#e2e8f0',
           bodyColor: '#94a3b8',
           callbacks: {
-            label: ctx => isMinuteLabel(yLabel)
-              ? ` ${fmtMinsValue(ctx.parsed.y, yLabel)}`
-              : ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`,
+            // opts.tooltipLabel wins when supplied (e.g. percent bars that want
+            // to show the raw count in the tooltip).
+            label: opts.tooltipLabel
+              ? opts.tooltipLabel
+              : ctx => isMinuteLabel(yLabel)
+                ? ` ${fmtMinsValue(ctx.parsed.y, yLabel)}`
+                : ` ${ctx.parsed.y.toLocaleString()} ${yLabel}`,
             // Only set when supplied — an explicit undefined would clobber
             // Chart.js's own default callback.
             ...(opts.afterBody ? { afterBody: opts.afterBody } : {})
@@ -3269,7 +3937,8 @@ function renderBarChart(canvasId, labels, data, colors, yLabel, opts = {}) {
         },
         y: {
           beginAtZero: yLabel !== 'Avg Δ resonance',
-          ticks: { color: '#64748b', font: { size: 12 } },
+          ticks: { color: '#64748b', font: { size: 12 },
+            ...(opts.yTickSuffix ? { callback: v => v + opts.yTickSuffix } : {}) },
           grid: { color: '#1e2235' },
           title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } }
         }
