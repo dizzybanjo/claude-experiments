@@ -431,7 +431,7 @@
     </div>
     <div class="field-group" style="max-width:170px; flex:0 1 170px;">
       <label>Min engagement (mins)</label>
-      <input type="number" id="filter-min-engagement" min="0" step="1" value="5">
+      <input type="number" id="filter-min-engagement" min="0" step="1" value="2">
     </div>
     <div class="field-group" style="max-width:170px; flex:0 1 170px;">
       <label title="Deep Listening is the default patch, so short periods are just the app handing off between activities. Staying in it beyond this counts as deliberate passive practice.">Min deep listen (secs)</label>
@@ -783,6 +783,47 @@
       </div>
     </div>
 
+    <!-- Time Spent -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Time Spent</span>
+        <span class="section-tags">whole Mon–Sun weeks · avg minutes per user active in-app that week · bold line = all users, thin lines = registration-week cohorts (hover for members)</span>
+      </div>
+      <div id="time-spent-summary" style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start;margin:4px 0 20px;padding:16px 20px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;"></div>
+      <div class="charts-grid">
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time in App per Week — mean</h3>
+          <p class="sub">Average app-session minutes (opened → last seen) per active user each whole week. Bold = all users; each thin line groups users by the calendar week they registered — hover a point for its members</p>
+          <div class="chart-wrap" style="height:360px;"><canvas id="chart-time-app"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time in App per Week — median</h3>
+          <p class="sub">Median app-session minutes per active user each whole week — robust to the heavy-user long tail that pulls the mean up</p>
+          <div class="chart-wrap" style="height:360px;"><canvas id="chart-time-app-median"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time in Activities per Week — mean</h3>
+          <p class="sub">Breathing, Meditation, Nature and Deep Listening — average activity minutes per active user each whole week (same paired-duration model as the Activities section)</p>
+          <div class="chart-wrap" style="height:360px;"><canvas id="chart-time-activities"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time in Activities per Week — median</h3>
+          <p class="sub">Median activity minutes per active user each whole week (Breathing, Meditation, Nature, Deep Listening)</p>
+          <div class="chart-wrap" style="height:360px;"><canvas id="chart-time-activities-median"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time in Chapters per Week — mean</h3>
+          <p class="sub">Each chapter's full audio length, credited in the week the user started it — counted only once they've started a later chapter (proof they listened all the way through)</p>
+          <div class="chart-wrap" style="height:360px;"><canvas id="chart-time-chapters"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Time in Chapters per Week — median</h3>
+          <p class="sub">Median per active user of the same full-length, completion-gated chapter minutes each whole week</p>
+          <div class="chart-wrap" style="height:360px;"><canvas id="chart-time-chapters-median"></canvas></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Retention -->
     <div class="charts-section">
       <div class="section-header">
@@ -864,6 +905,19 @@ const STATE_CONDITIONS = [
   { toEnterState: 16, conditions: { currentState: 15, chapterCompleted: 15, day: 10, persuasion: true, resonance: 95 } },
   { toEnterState: 17, conditions: { currentState: 16, chapterCompleted: 16 } },
 ];
+
+// Known chapter audio lengths [minutes, seconds]. A chapter counts as fully
+// listened only once the user has started a later chapter (the app's own proof of
+// completion), at which point its whole length is credited to the "time in chapters"
+// total for the week they started it.
+const CHAPTER_LENGTHS = {
+  1:[13,55], 2:[6,59],  3:[12,6],  4:[10,37], 5:[12,20], 6:[16,47],
+  7:[6,47],  8:[8,43],  9:[8,15],  10:[3,41], 11:[3,49], 12:[3,38],
+  13:[8,45], 14:[6,15], 15:[6,52], 16:[20,58], 17:[1,0],
+};
+const CHAPTER_MINS = Object.fromEntries(
+  Object.entries(CHAPTER_LENGTHS).map(([ch, [m, s]]) => [ch, m + s / 60])
+);
 
 // 'ambient' is the entity name in the export; the product calls it Deep Listening.
 const ACTIVITIES     = ['breathing', 'meditation', 'nature', 'ambient'];
@@ -1418,7 +1472,7 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   document.getElementById('filter-alpha-btn').classList.remove('active');
   filterMinEngagement = true;
   document.getElementById('filter-engagement-btn').classList.add('active');
-  document.getElementById('filter-min-engagement').value = '5';
+  document.getElementById('filter-min-engagement').value = '2';
   document.getElementById('filter-ambient-min').value = String(AMBIENT_MIN_LISTEN_DEFAULT);
   document.getElementById('filter-max-duration').value = String(TOTAL_TIME_MAX_DEFAULT);
   document.getElementById('filter-max-duration-avg').value = String(AVG_DURATION_MAX_DEFAULT);
@@ -1591,6 +1645,8 @@ function applyFilters() {
   renderStreaks();
   // sessions
   renderSessionCharts();
+  // time spent (whole-week blocks)
+  renderTimeSpentCharts();
   // retention
   renderDAUMAU();
   renderChurnCharts();
@@ -2515,26 +2571,34 @@ function renderChapterResonanceSurplus() {
 
   const chEvts = filteredData.filter(r => (r[cols.type]||'').toLowerCase().includes('chapter'));
 
-  // First entry per user per chapter — that's the event that crossed the gate;
-  // later re-entries have drifted away from it.
-  const firstEntry = {};
+  // The gate is only checked the first time a user *unlocks* a chapter, i.e. when
+  // they reach a new highest chapter in their run. "started" also fires on every
+  // re-entry and on post-progress replay/reset sweeps (e.g. rewinding 17→16→…→1),
+  // where resonance has decayed or been reset well below the gate — those events
+  // never re-check the gate, so counting them invents impossible sub-gate entries.
+  // So we walk each user's starts in time order and only take the resonance at the
+  // moment they first reach a chapter higher than any they'd reached before.
+  const perUser = {};
   chEvts.forEach(r => {
     const user = r[cols.user];
     const m    = (r[cols.entity] || '').match(/(\d+)/);
     const res  = parseFloat(r[cols.resonance]);
     const dt   = parseDate(r[cols.datetime]);
     if (!user || !m || isNaN(res) || !dt) return;
-    const ch = parseInt(m[1], 10);
-    if (!(ch in resReq)) return;
     if (!isStartAction(r[cols.action] || '')) return;
-    const key = `${user}||${ch}`;
-    if (!firstEntry[key] || dt < firstEntry[key].dt) firstEntry[key] = { ch, dt, res };
+    (perUser[user] = perUser[user] || []).push({ ch: parseInt(m[1], 10), res, dt });
   });
 
   const byChapter = {};
-  Object.values(firstEntry).forEach(({ ch, res }) => {
-    if (!byChapter[ch]) byChapter[ch] = [];
-    byChapter[ch].push(res - resReq[ch]);
+  Object.values(perUser).forEach(evts => {
+    evts.sort((a, b) => a.dt - b.dt);
+    let maxCh = 0;
+    evts.forEach(({ ch, res }) => {
+      if (ch <= maxCh) return;        // re-entry or replay/reset sweep, not a new unlock
+      maxCh = ch;
+      if (!(ch in resReq)) return;    // reached a new chapter, but it isn't resonance-gated
+      (byChapter[ch] = byChapter[ch] || []).push(res - resReq[ch]);
+    });
   });
 
   const chapters = Object.keys(byChapter).map(Number).sort((a, b) => a - b);
@@ -3685,6 +3749,7 @@ function renderActivityResonanceTrend() {
       scales: {
         x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12 }, grid: { color: '#1e2235' } },
         y: {
+          beginAtZero: true,
           ticks: { color: '#64748b', font: { size: 12 } },
           grid: { color: '#1e2235' },
           title: { display: true, text: 'Avg Δ resonance', color: '#475569', font: { size: 11 } }
@@ -3802,7 +3867,7 @@ function renderChapterTimeOfDay() {
 }
 
 // ---- chart helper ----
-function renderLineChart(canvasId, labels, data, color, yLabel) {
+function renderLineChart(canvasId, labels, data, color, yLabel, opts = {}) {
   destroyChart(canvasId);
   if (!labels.length) {
     const ctx = document.getElementById(canvasId);
@@ -3844,7 +3909,7 @@ function renderLineChart(canvasId, labels, data, color, yLabel) {
       },
       scales: {
         x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12 }, grid: { color: '#1e2235' } },
-        y: { ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
+        y: { beginAtZero: opts.beginAtZero !== false, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
           title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } } }
       }
     }
@@ -3912,7 +3977,7 @@ function renderBarChart(canvasId, labels, data, colors, yLabel, opts = {}) {
           grid: { color: '#1e2235' }
         },
         y: {
-          beginAtZero: yLabel !== 'Avg Δ resonance',
+          beginAtZero: true,
           ticks: { color: '#64748b', font: { size: 12 },
             ...(opts.yTickSuffix ? { callback: v => v + opts.yTickSuffix } : {}) },
           grid: { color: '#1e2235' },
@@ -4141,12 +4206,12 @@ function renderSessionCharts() {
   const tbLabels = Object.keys(timeBuckets).sort();
   renderLineChart('chart-session-length-time', tbLabels,
     tbLabels.map(k => +(timeBuckets[k].reduce((a,b) => a+b, 0) / timeBuckets[k].length).toFixed(1)),
-    PALETTE[3], 'avg mins');
+    PALETTE[3], 'avg mins', { beginAtZero: true });
 
   // Median session length over time (same buckets as above)
   renderLineChart('chart-session-length-median', tbLabels,
     tbLabels.map(k => +median(timeBuckets[k]).toFixed(1)),
-    PALETTE[5], 'median mins');
+    PALETTE[5], 'median mins', { beginAtZero: true });
 
   // Session frequency per user
   const userCount = {};
@@ -4169,6 +4234,272 @@ function renderSessionCharts() {
   const wLabels = Object.keys(weekBuckets).sort();
   renderBarChart('chart-sessions-per-week', wLabels, wLabels.map(k => weekBuckets[k]),
     wLabels.map((_, i) => PALETTE[i % PALETTE.length]), 'sessions');
+}
+
+// ---- Time Spent per whole week: app / activities / chapters ----
+// Whole Mon–Sun week blocks only (partial ends dropped), like the DAU/MAU headline.
+// Every chart shares one denominator — users active in the app that week — so a user
+// who opened the app but did no chapters counts as a zero, and the three charts
+// describe the same population. A bold "all users" average sits on top of one thin
+// line per registration-week cohort; hovering a point lists that line's members.
+
+function weekMondayLocal(d) {
+  const m = new Date(d); m.setHours(0, 0, 0, 0);
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));   // back up to Monday
+  return m;
+}
+function weekLabel(key) {
+  return new Date(key + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+// Complete Mon–Sun weeks fully inside [min, max] of the given dates.
+function wholeWeekIndex(dates) {
+  const times = dates.filter(Boolean).map(d => d.getTime());
+  if (!times.length) return { keys: [], keyFor: () => null };
+  const dayStart = t => { const x = new Date(t); x.setHours(0, 0, 0, 0); return x; };
+  const minD = dayStart(Math.min(...times));
+  const maxD = dayStart(Math.max(...times));
+  const startMon = weekMondayLocal(minD);
+  if (startMon.getTime() < minD.getTime()) startMon.setDate(startMon.getDate() + 7);  // first full week
+  const keys = [];
+  for (const ws = new Date(startMon); ; ws.setDate(ws.getDate() + 7)) {
+    const we = new Date(ws); we.setDate(we.getDate() + 6);
+    if (we.getTime() > maxD.getTime()) break;
+    keys.push(localDayKey(ws));
+  }
+  const keySet = new Set(keys);
+  return {
+    keys,
+    keyFor: d => {
+      if (!d) return null;
+      const k = localDayKey(weekMondayLocal(d));
+      return keySet.has(k) ? k : null;
+    },
+  };
+}
+
+// Pool every per-user weekly value across the whole shown period (one entry per
+// user per whole week they were active in-app, 0 when they logged none of the
+// metric) — the population the headline avg/median summarise.
+function poolWeekly(userWeek, activeByWeek, weekKeys) {
+  const vals = [];
+  weekKeys.forEach(k => {
+    const active = activeByWeek[k];
+    if (!active) return;
+    active.forEach(u => vals.push((userWeek[u] && userWeek[u][k]) || 0));
+  });
+  return vals;
+}
+
+// Like buildDurationMap, but keeps each occurrence's user and start time so the
+// minutes can be bucketed by week. Same start→end pairing and max-mins cap, so the
+// totals stay consistent with the Activities duration charts.
+function buildDurationRecords(events, maxMins) {
+  const sessions = {};
+  events.forEach(r => {
+    const entity = r[cols.entity] || '', user = r[cols.user] || '';
+    if (!entity || !user) return;
+    const key = `${user}||${entity}`;
+    if (!sessions[key]) sessions[key] = { user, starts: [], ends: [] };
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    const action = r[cols.action] || '';
+    if (isStartAction(action)) sessions[key].starts.push({ dt });
+    else if (isEndAction(action)) sessions[key].ends.push({ dt });
+  });
+  const recs = [];
+  Object.values(sessions).forEach(({ user, starts, ends }) => {
+    starts.sort((a, b) => a.dt - b.dt);
+    ends.sort((a, b) => a.dt - b.dt);
+    const usedEnds = new Set();
+    starts.forEach(start => {
+      const match = ends.find(e => !usedEnds.has(e) && isValidEndForStart(start.dt, e.dt));
+      if (!match) return;
+      const mins = (match.dt - start.dt) / 60000;
+      if (mins > maxMins) return;
+      usedEnds.add(match);
+      recs.push({ user, dt: start.dt, mins });
+    });
+  });
+  return recs;
+}
+
+function renderTimeSpentCharts() {
+  const IDS = ['chart-time-app', 'chart-time-activities', 'chart-time-chapters',
+               'chart-time-app-median', 'chart-time-activities-median', 'chart-time-chapters-median'];
+  const summaryEl = document.getElementById('time-spent-summary');
+  const wk = wholeWeekIndex(filteredData.map(r => parseDate(r[cols.datetime])));
+  if (!wk.keys.length) {
+    IDS.forEach(destroyChart);
+    if (summaryEl) summaryEl.innerHTML = '<span style="color:var(--muted);font-size:12px;">No complete Mon–Sun week in the current selection.</span>';
+    return;
+  }
+
+  // Registration-week cohort per user.
+  const regDate = {};
+  filteredData.forEach(r => {
+    const u = r[cols.user];
+    if (!u || regDate[u]) return;
+    const rd = parseDate(r['User Registration Date']);
+    if (rd) regDate[u] = rd;
+  });
+  const cohortOf = {}, cohortUsers = {};
+  Object.entries(regDate).forEach(([u, rd]) => {
+    const c = localDayKey(weekMondayLocal(rd));
+    cohortOf[u] = c;
+    (cohortUsers[c] = cohortUsers[c] || new Set()).add(u);
+  });
+
+  const add = (map, u, k, v) => { if (!k) return; const m = (map[u] = map[u] || {}); m[k] = (m[k] || 0) + v; };
+  const appUW = {}, actUW = {}, chapUW = {};
+
+  // App time, and the shared "active in app that week" denominator.
+  const activeByWeek = {};
+  sessionData.forEach(s => {
+    const k = wk.keyFor(s.start);
+    if (!k) return;
+    add(appUW, s.user, k, s.length);
+    (activeByWeek[k] = activeByWeek[k] || new Set()).add(s.user);
+  });
+
+  // Activity time — Breathing / Meditation / Nature / Deep Listening, using the same
+  // paired-duration model (and cap) as the Activities section.
+  const actEvents = activityRows.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('task') &&
+    ACTIVITIES.some(a => (r[cols.entity] || '').toLowerCase().includes(a))
+  );
+  buildDurationRecords(actEvents, getMaxDurationMinsAvg()).forEach(rec =>
+    add(actUW, rec.user, wk.keyFor(rec.dt), rec.mins));
+
+  // Chapter time — credit a chapter's full audio length in the week the user first
+  // reached it, but only once they've started a later chapter (proof of completion).
+  const chStarts = {};
+  filteredData.forEach(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('chapter')) return;
+    if (!isStartAction(r[cols.action] || '')) return;
+    const u = r[cols.user], m = (r[cols.entity] || '').match(/(\d+)/), dt = parseDate(r[cols.datetime]);
+    if (!u || !m || !dt) return;
+    (chStarts[u] = chStarts[u] || []).push({ ch: parseInt(m[1], 10), dt });
+  });
+  Object.entries(chStarts).forEach(([u, evs]) => {
+    evs.sort((a, b) => a.dt - b.dt);
+    let maxCh = 0; const firstStart = {};
+    evs.forEach(({ ch, dt }) => { if (ch > maxCh) { firstStart[ch] = dt; maxCh = ch; } });
+    Object.entries(firstStart).forEach(([chStr, dt]) => {
+      const ch = +chStr;
+      if (ch < maxCh && CHAPTER_MINS[ch]) add(chapUW, u, wk.keyFor(dt), CHAPTER_MINS[ch]);
+    });
+  });
+
+  // Headline avg + median minutes per active user per week, across the whole period.
+  if (summaryEl) {
+    const block = (label, vals) => {
+      if (!vals.length) return `
+        <div>
+          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;">${label} / week</div>
+          <div style="font-size:26px;font-weight:700;color:var(--muted);">—</div>
+        </div>`;
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return `
+        <div>
+          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;">${label} / week</div>
+          <div style="font-size:26px;font-weight:700;letter-spacing:-0.5px;color:var(--accent2);">${avg.toFixed(1)}<span style="font-size:12px;color:var(--muted);font-weight:500;"> min avg</span></div>
+          <div style="font-size:13px;color:var(--muted);">${median(vals).toFixed(1)} min median</div>
+        </div>`;
+    };
+    summaryEl.innerHTML =
+      `<div style="align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;max-width:96px;">Whole period<br>per active user</div>` +
+      block('App', poolWeekly(appUW, activeByWeek, wk.keys)) +
+      block('Activities', poolWeekly(actUW, activeByWeek, wk.keys)) +
+      block('Chapters', poolWeekly(chapUW, activeByWeek, wk.keys));
+  }
+
+  renderWeeklyTimeChart('chart-time-app', wk.keys, appUW, activeByWeek, cohortOf, cohortUsers);
+  renderWeeklyTimeChart('chart-time-activities', wk.keys, actUW, activeByWeek, cohortOf, cohortUsers);
+  renderWeeklyTimeChart('chart-time-chapters', wk.keys, chapUW, activeByWeek, cohortOf, cohortUsers);
+  renderWeeklyTimeChart('chart-time-app-median', wk.keys, appUW, activeByWeek, cohortOf, cohortUsers, true);
+  renderWeeklyTimeChart('chart-time-activities-median', wk.keys, actUW, activeByWeek, cohortOf, cohortUsers, true);
+  renderWeeklyTimeChart('chart-time-chapters-median', wk.keys, chapUW, activeByWeek, cohortOf, cohortUsers, true);
+}
+
+function renderWeeklyTimeChart(canvasId, weekKeys, userWeek, activeByWeek, cohortOf, cohortUsers, useMedian = false) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  // Aggregate a week's per-user minutes. Every user active in the app that week is
+  // counted, with 0 for those who logged none of this metric — so mean and median
+  // describe the same population as the shared denominator.
+  const aggOver = (users, k) => {
+    if (!users || !users.size) return null;
+    const vals = [];
+    users.forEach(u => vals.push((userWeek[u] && userWeek[u][k]) || 0));
+    const v = useMedian ? median(vals) : vals.reduce((a, b) => a + b, 0) / vals.length;
+    return +v.toFixed(1);
+  };
+
+  const datasets = [];
+  const userListsByDs = [];   // datasetIndex -> dataIndex -> [users], for the rollover
+
+  // One thin line per registration-week cohort.
+  Object.keys(cohortUsers).sort().forEach((c, ci) => {
+    const color = PALETTE[ci % PALETTE.length];
+    const lists = [];
+    const data = weekKeys.map(k => {
+      const members = new Set();
+      const active = activeByWeek[k];
+      if (active) active.forEach(u => { if (cohortOf[u] === c) members.add(u); });
+      lists.push([...members]);
+      return aggOver(members, k);
+    });
+    if (!data.some(v => v != null)) return;   // this cohort was never active in a whole week
+    datasets.push({
+      label: `Joined ${weekLabel(c)}`, data,
+      borderColor: color, backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 2, pointHoverRadius: 5, fill: false, tension: 0.3, spanGaps: true,
+    });
+    userListsByDs.push(lists);
+  });
+
+  // All-users average, bold and on top.
+  datasets.push({
+    label: useMedian ? 'All users (median)' : 'All users (avg)', data: weekKeys.map(k => aggOver(activeByWeek[k], k)),
+    borderColor: '#f8fafc', backgroundColor: 'transparent',
+    borderWidth: 3, pointRadius: 3, pointHoverRadius: 6, fill: false, tension: 0.3, spanGaps: true,
+  });
+  userListsByDs.push(weekKeys.map(k => activeByWeek[k] ? [...activeByWeek[k]] : []));
+
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: weekKeys.map(weekLabel), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 8 } },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y} min`,
+            afterBody: items => {
+              const it = items[0];
+              if (!it) return [];
+              const list = (userListsByDs[it.datasetIndex] || [])[it.dataIndex] || [];
+              if (!list.length) return [];
+              const shown = list.slice(0, 12).map(shortId).join(', ');
+              return ['', `${list.length} active user${list.length === 1 ? '' : 's'}: ${shown}${list.length > 12 ? ', …' : ''}`];
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 12 }, grid: { color: '#1e2235' } },
+        y: { beginAtZero: true, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' },
+          title: { display: true, text: `${useMedian ? 'median' : 'avg'} minutes / active user`, color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
 }
 
 // ---- Weekly mean DAU / mean MAU (whole-week blocks) ----
