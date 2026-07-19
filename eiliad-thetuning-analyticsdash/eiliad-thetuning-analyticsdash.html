@@ -458,7 +458,7 @@
 <div class="stat-card"><div class="label">Unique users</div><div class="value" id="stat-users">—</div></div>
     <div class="stat-card"><div class="label">Avg resonance ↑</div><div class="value" id="stat-resonance">—</div></div>
     <div class="stat-card"><div class="label">Date range</div><div class="value" style="font-size:15px;letter-spacing:-0.3px" id="stat-range">—</div></div>
-    <div class="stat-card"><div class="label">DAU / MAU</div><div class="value" id="stat-dau-mau">—</div></div>
+    <div class="stat-card" title="Latest complete Mon–Sun week: mean daily active users ÷ mean 30-day rolling MAU across that week."><div class="label">DAU / MAU</div><div class="value" id="stat-dau-mau">—</div></div>
     <div class="stat-card" title="Mean of every cohort user's task events per distinct chapter reached. Each user counts once, regardless of how much they played."><div class="label">Avg practice / chapter</div><div class="value" id="stat-practice-narrative">—</div></div>
     <div class="stat-card"><div class="label">Avg session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-len">—</div></div>
     <div class="stat-card"><div class="label">Median session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-median">—</div></div>
@@ -791,7 +791,8 @@
       <div class="charts-grid">
         <div class="chart-card" style="grid-column: 1 / -1;">
           <h3>DAU / MAU</h3>
-          <p class="sub">Daily active users vs 30-day rolling monthly active users (by app opens)</p>
+          <p class="sub">Latest complete week's mean daily active users ÷ mean 30-day rolling MAU · daily series below</p>
+          <div id="dau-mau-weekly-summary" style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start;margin-bottom:18px;padding:16px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;"></div>
           <div class="chart-wrap" style="height:320px;"><canvas id="chart-dau-mau"></canvas></div>
         </div>
         <div class="chart-card">
@@ -1617,36 +1618,11 @@ const users = new Set(filteredData.map(r => r[cols.user]).filter(Boolean));
     }
   }
 
-  // DAU/MAU stat — ratio on most recent day in dataset
+  // DAU/MAU stat — latest complete week's mean(DAU) / mean(MAU)
   const dauEl = document.getElementById('stat-dau-mau');
   if (dauEl) {
-    const openedEvents = filteredData.filter(r =>
-      (r[cols.type] || '').toLowerCase() === 'app' &&
-      (r[cols.action] || '').toLowerCase().startsWith('opened')
-    );
-    const dayUsers = {};
-    openedEvents.forEach(r => {
-      const user = r[cols.user], dt = parseDate(r[cols.datetime]);
-      if (!user || !dt) return;
-      const day = localDayKey(dt);
-      if (!dayUsers[day]) dayUsers[day] = new Set();
-      dayUsers[day].add(user);
-    });
-    const days = Object.keys(dayUsers).sort();
-    if (days.length) {
-      const lastDay = days[days.length - 1];
-      const dau = dayUsers[lastDay].size;
-      const lastDate = new Date(lastDay + 'T00:00:00Z');
-      const thirtyBack = new Date(lastDate.getTime() - 29 * 86400000);
-      const mauSet = new Set();
-      days.forEach(d => {
-        const dd = new Date(d + 'T00:00:00Z');
-        if (dd >= thirtyBack && dd <= lastDate) dayUsers[d].forEach(u => mauSet.add(u));
-      });
-      dauEl.textContent = mauSet.size > 0 ? `${(dau / mauSet.size * 100).toFixed(0)}%` : '—';
-    } else {
-      dauEl.textContent = '—';
-    }
+    const { latest } = computeWeeklyDAUMAU();
+    dauEl.textContent = latest ? `${latest.ratio.toFixed(0)}%` : '—';
   }
 
   // Avg session length stat
@@ -4195,8 +4171,113 @@ function renderSessionCharts() {
     wLabels.map((_, i) => PALETTE[i % PALETTE.length]), 'sessions');
 }
 
+// ---- Weekly mean DAU / mean MAU (whole-week blocks) ----
+// For each complete Mon–Sun week fully inside the data range:
+//   meanDAU  = average daily active users across the 7 days
+//   meanMAU  = average of the 30-day rolling MAU across the 7 days
+//   ratio    = meanDAU / meanMAU  (the stickiness headline)
+// Weekday/weekend figures split the DAU numerator; the MAU denominator
+// stays the week's mean MAU so the three ratios are comparable.
+function computeWeeklyDAUMAU() {
+  const openedEvents = filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase() === 'app' &&
+    (r[cols.action] || '').toLowerCase().startsWith('opened')
+  );
+  const dayUsers = {};
+  openedEvents.forEach(r => {
+    const user = r[cols.user], dt = parseDate(r[cols.datetime]);
+    if (!user || !dt) return;
+    const day = localDayKey(dt);
+    if (!dayUsers[day]) dayUsers[day] = new Set();
+    dayUsers[day].add(user);
+  });
+  const dayKeys = Object.keys(dayUsers).sort();
+  if (!dayKeys.length) return { weeks: [], latest: null };
+
+  const DAY = 86400000;
+  const firstDay = new Date(dayKeys[0] + 'T00:00:00Z');
+  const lastDay  = new Date(dayKeys[dayKeys.length - 1] + 'T00:00:00Z');
+
+  const dauForKey = key => (dayUsers[key] ? dayUsers[key].size : 0);
+  const mauForDate = date => {
+    const start = new Date(date.getTime() - 29 * DAY);
+    const set = new Set();
+    dayKeys.forEach(k => {
+      const d = new Date(k + 'T00:00:00Z');
+      if (d >= start && d <= date) dayUsers[k].forEach(u => set.add(u));
+    });
+    return set.size;
+  };
+  const mean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+  // First Monday on/after the first day of data (so every week is complete).
+  const mondayOf = date => {
+    const dow = date.getUTCDay();            // 0 Sun … 6 Sat
+    return new Date(date.getTime() + (dow === 0 ? -6 : 1 - dow) * DAY);
+  };
+  let firstMon = mondayOf(firstDay);
+  if (firstMon < firstDay) firstMon = new Date(firstMon.getTime() + 7 * DAY);
+
+  const weeks = [];
+  for (let ws = new Date(firstMon); ; ws = new Date(ws.getTime() + 7 * DAY)) {
+    const we = new Date(ws.getTime() + 6 * DAY);   // Sunday
+    if (we > lastDay) break;                        // only whole weeks
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(ws.getTime() + i * DAY);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ dow: d.getUTCDay(), dau: dauForKey(key), mau: mauForDate(d) });
+    }
+    const weekdayDAU = days.filter(d => d.dow >= 1 && d.dow <= 5).map(d => d.dau);
+    const weekendDAU = days.filter(d => d.dow === 0 || d.dow === 6).map(d => d.dau);
+    const meanDAU = mean(days.map(d => d.dau));
+    const meanDAUWeekday = mean(weekdayDAU);
+    const meanDAUWeekend = mean(weekendDAU);
+    const meanMAU = mean(days.map(d => d.mau));
+    weeks.push({
+      weekStart: ws.toISOString().slice(0, 10),
+      weekEnd:   we.toISOString().slice(0, 10),
+      meanDAU, meanDAUWeekday, meanDAUWeekend, meanMAU,
+      ratio:        meanMAU ? meanDAU / meanMAU * 100 : 0,
+      ratioWeekday: meanMAU ? meanDAUWeekday / meanMAU * 100 : 0,
+      ratioWeekend: meanMAU ? meanDAUWeekend / meanMAU * 100 : 0,
+    });
+  }
+  return { weeks, latest: weeks.length ? weeks[weeks.length - 1] : null };
+}
+
+function renderWeeklyDAUMAUSummary() {
+  const el = document.getElementById('dau-mau-weekly-summary');
+  if (!el) return;
+  const { latest } = computeWeeklyDAUMAU();
+  if (!latest) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px;">No complete Mon–Sun week in range yet.</span>';
+    return;
+  }
+  const pct = v => `${v.toFixed(1)}%`;
+  el.innerHTML = `
+    <div>
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;">Mean DAU / MAU</div>
+      <div style="font-size:30px;font-weight:700;letter-spacing:-1px;color:var(--accent2);">${pct(latest.ratio)}</div>
+      <div style="color:var(--muted);font-size:11px;">week of ${latest.weekStart}</div>
+    </div>
+    <div>
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;">Weekday</div>
+      <div style="font-size:20px;font-weight:600;">${pct(latest.ratioWeekday)}</div>
+    </div>
+    <div>
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;">Weekend</div>
+      <div style="font-size:20px;font-weight:600;">${pct(latest.ratioWeekend)}</div>
+    </div>
+    <div style="border-left:1px solid var(--border);padding-left:24px;">
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px;">Raw (mean/day)</div>
+      <div style="font-size:15px;margin-top:4px;"><strong>${latest.meanDAU.toFixed(1)}</strong> DAU&nbsp;·&nbsp;<strong>${Math.round(latest.meanMAU)}</strong> MAU</div>
+    </div>`;
+}
+
 // ---- DAU / MAU ----
 function renderDAUMAU() {
+  renderWeeklyDAUMAUSummary();
   const openedEvents = filteredData.filter(r =>
     (r[cols.type] || '').toLowerCase() === 'app' &&
     (r[cols.action] || '').toLowerCase().startsWith('opened')
