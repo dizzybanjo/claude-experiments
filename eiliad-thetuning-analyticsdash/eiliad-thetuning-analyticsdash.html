@@ -1001,8 +1001,8 @@ function resetAll() {
 // ---- specific user exclusions ----
 const EXCL_USERS_KEY = 'eiliad_excl_users';
 let specificExclUsers = (() => {
-  try { return new Set(['USER-GVUGDH', 'USER-DVXWZU', ...JSON.parse(localStorage.getItem(EXCL_USERS_KEY) || '[]')]); }
-  catch(e) { return new Set(['USER-GVUGDH', 'USER-DVXWZU']); }
+  try { return new Set(['USER-GVUGDH', 'USER-DVXWZU', 'USER-DWJPHJ', 'USER-RKQFK7', ...JSON.parse(localStorage.getItem(EXCL_USERS_KEY) || '[]')]); }
+  catch(e) { return new Set(['USER-GVUGDH', 'USER-DVXWZU', 'USER-DWJPHJ', 'USER-RKQFK7']); }
 })();
 
 function saveExclUsers() {
