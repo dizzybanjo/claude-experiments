@@ -464,6 +464,12 @@
     <div class="stat-card"><div class="label">Median session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-median">—</div></div>
   </div>
 
+  <!-- Export bar -->
+  <div id="export-bar" style="display:none; justify-content:flex-end; align-items:center; gap:10px; margin:-6px 0 20px;">
+    <span id="export-msg" style="font-size:12px; color:var(--muted);"></span>
+    <button class="btn btn-ghost" id="export-md-btn" title="Copy the current dashboard view (headline stats, active filters and every visible chart's data) as Markdown, and download a .md file — ready to paste to a Claude agent.">⧉ Export stats as Markdown</button>
+  </div>
+
   <!-- Charts wrapper -->
   <div class="charts-wrapper" id="charts-wrapper">
 
@@ -1023,6 +1029,7 @@ function handleFile(file) {
       document.getElementById('filters-bar').classList.add('visible');
       document.getElementById('stats-row').classList.add('visible');
       document.getElementById('charts-wrapper').classList.add('visible');
+      document.getElementById('export-bar').style.display = 'flex';
       initChartToggles();
     },
     error(err) { alert('Parse error: ' + err.message); }
@@ -1049,6 +1056,7 @@ function resetAll() {
   document.getElementById('filters-bar').classList.remove('visible');
   document.getElementById('stats-row').classList.remove('visible');
   document.getElementById('charts-wrapper').classList.remove('visible');
+  document.getElementById('export-bar').style.display = 'none';
   Object.values(charts).forEach(c => c && c.destroy());
   charts = {};
 }
@@ -4849,6 +4857,212 @@ function restoreVisibilityState() {
     }
   });
 }
+
+// ---- Export the current dashboard view as Markdown (for a Claude agent to read) ----
+// The point is the underlying numbers: every visible chart is rendered as a small
+// markdown table (label -> value per series), pulled straight from the live Chart.js
+// instances, so it reflects exactly what's on screen under the current filters.
+const EXPORT_MAX_ROWS = 200; // per-chart row cap (per-user charts can be long)
+
+function fmtNum(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'object') {
+    if ('y' in v) return fmtNum(v.y);
+    if ('x' in v) return fmtNum(v.x);
+    return JSON.stringify(v);
+  }
+  const n = Number(v);
+  if (!isFinite(n)) return String(v);
+  if (Number.isInteger(n)) return String(n);
+  return String(Math.round(n * 1000) / 1000);
+}
+
+function mdEscape(s) {
+  return String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
+}
+
+// Turn one live Chart.js instance into a markdown table of its actual values.
+function chartToMarkdown(chart) {
+  if (!chart || !chart.data) return '';
+  const labels = chart.data.labels || [];
+  // Only include series the user hasn't toggled off in the legend.
+  const datasets = (chart.data.datasets || []).filter((ds, i) => {
+    try { return chart.isDatasetVisible(i); } catch (e) { return true; }
+  });
+  if (!datasets.length) return '';
+
+  // Header for the label column: prefer the x-axis title if the chart defines one.
+  let labelHead = 'Label';
+  try {
+    const xt = chart.options?.scales?.x?.title;
+    if (xt && xt.text) labelHead = String(xt.text);
+  } catch (e) {}
+
+  const single = datasets.length === 1;
+  const rowCount = Math.max(labels.length, ...datasets.map(d => (d.data || []).length));
+
+  // Single-series, no labels but with {x,y} points: derive labels from x.
+  const getLabel = i => {
+    if (labels[i] !== undefined && labels[i] !== null && labels[i] !== '') return labels[i];
+    const p = datasets[0].data && datasets[0].data[i];
+    if (p && typeof p === 'object' && 'x' in p) return p.x;
+    return i + 1;
+  };
+
+  const headers = [labelHead].concat(
+    datasets.map((d, i) => d.label && String(d.label).trim() ? String(d.label) : (single ? 'Value' : 'Series ' + (i + 1)))
+  );
+
+  const lines = [];
+  lines.push('| ' + headers.map(mdEscape).join(' | ') + ' |');
+  lines.push('|' + headers.map(() => '---').join('|') + '|');
+
+  const limit = Math.min(rowCount, EXPORT_MAX_ROWS);
+  for (let i = 0; i < limit; i++) {
+    const cells = [mdEscape(getLabel(i))];
+    let allEmpty = true;
+    datasets.forEach(d => {
+      const v = fmtNum((d.data || [])[i]);
+      if (v !== '') allEmpty = false;
+      cells.push(v);
+    });
+    if (allEmpty) continue; // skip rows with no data at all
+    lines.push('| ' + cells.join(' | ') + ' |');
+  }
+  let out = lines.join('\n');
+  if (rowCount > limit) out += `\n\n_…${rowCount - limit} more rows omitted (cap ${EXPORT_MAX_ROWS})._`;
+  return out;
+}
+
+// Read the current filter state from the controls, listing only what's active.
+function exportFilterLines() {
+  const g = id => document.getElementById(id);
+  const out = [];
+  const push = (label, val) => { if (val) out.push(`- **${label}:** ${val}`); };
+  const tagText = id => {
+    const el = g(id);
+    if (!el) return '';
+    return Array.from(el.children).map(c => c.textContent.replace(/\s*×\s*$/, '').trim()).filter(Boolean).join(', ');
+  };
+  push('From date', g('filter-from')?.value);
+  push('To date', g('filter-to')?.value);
+  push('User', g('filter-user')?.value ? 'USER-' + g('filter-user').value : '');
+  push('Event type', g('filter-type')?.value);
+  push('Exclude registered from', g('filter-excl-from')?.value);
+  push('Exclude registered to', g('filter-excl-to')?.value);
+  push('Cohort registered after', g('filter-cohort-after')?.value);
+  push('Excluded users', tagText('excl-user-tags'));
+  push('Show only users', tagText('include-user-tags'));
+  push('Replay pairs', tagText('replay-user-tags'));
+  push('Min engagement (mins)', g('filter-min-engagement')?.value);
+  push('Min deep listen (secs)', g('filter-ambient-min')?.value);
+  push('Max session — total (mins)', g('filter-max-duration')?.value);
+  push('Max session — average (mins)', g('filter-max-duration-avg')?.value);
+  const toggle = (id, name) => { const b = g(id); if (b && b.classList.contains('active')) out.push(`- **${name}:** on`); };
+  toggle('filter-engagement-btn', 'Min Engagement filter');
+  toggle('filter-alpha-btn', 'Alpha Users cohort');
+  toggle('filter-cheat-btn', 'Filter Cheat/Dev');
+  toggle('filter-quality-btn', 'Quality Sessions filter');
+  return out;
+}
+
+function buildExportMarkdown() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const md = [];
+
+  md.push('# EILIAD — The Tuning Analytics Dashboard — stats export');
+  md.push('');
+  const fileName = document.getElementById('badge-name')?.textContent || '';
+  const fileRows = document.getElementById('badge-rows')?.textContent || '';
+  md.push(`_Exported ${stamp}${fileName ? ` · data: ${fileName}${fileRows ? ` (${fileRows})` : ''}` : ''}_`);
+  md.push('');
+
+  // Headline stat cards.
+  md.push('## Headline stats');
+  md.push('');
+  md.push('| Metric | Value |');
+  md.push('|---|---|');
+  document.querySelectorAll('#stats-row .stat-card').forEach(card => {
+    const label = card.querySelector('.label')?.textContent.trim();
+    const value = card.querySelector('.value')?.textContent.trim();
+    if (label) md.push(`| ${mdEscape(label)} | ${mdEscape(value)} |`);
+  });
+  md.push('');
+
+  // Active filters.
+  const filters = exportFilterLines();
+  md.push('## Active filters');
+  md.push('');
+  md.push(filters.length ? filters.join('\n') : '_None — showing everything._');
+  md.push('');
+
+  // Every visible chart, section by section, as a table of its real values.
+  document.querySelectorAll('.charts-section').forEach(section => {
+    const sectionTitle = section.querySelector('.section-title')?.textContent.trim() || '';
+    const cards = Array.from(section.querySelectorAll('.chart-card'))
+      .filter(card => !card.classList.contains('collapsed'));
+
+    // Collect renderable charts in this section first, so we skip empty sections.
+    const blocks = [];
+    cards.forEach(card => {
+      const canvas = card.querySelector('canvas');
+      if (!canvas) return;
+      const chart = charts[canvas.id];
+      if (!chart) return;
+      const table = chartToMarkdown(chart);
+      if (!table) return;
+      const title = card.querySelector('h3')?.textContent.trim() || canvas.id;
+      const sub = card.querySelector('.sub')?.textContent.trim() || '';
+      blocks.push({ title, sub, table });
+    });
+    if (!blocks.length) return;
+
+    md.push(`## ${mdEscape(sectionTitle) || 'Charts'}`);
+    md.push('');
+    blocks.forEach(b => {
+      md.push(`### ${mdEscape(b.title)}`);
+      if (b.sub) { md.push(''); md.push(`_${b.sub.replace(/\s+/g, ' ')}_`); }
+      md.push('');
+      md.push(b.table);
+      md.push('');
+    });
+  });
+
+  return md.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+function flashExportMsg(text) {
+  const el = document.getElementById('export-msg');
+  if (!el) return;
+  el.textContent = text;
+  clearTimeout(flashExportMsg._t);
+  flashExportMsg._t = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+document.getElementById('export-md-btn').addEventListener('click', async () => {
+  if (!Object.keys(charts).length) { flashExportMsg('Load a CSV first.'); return; }
+  const markdown = buildExportMarkdown();
+
+  // Download a .md file.
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fname = `eiliad-stats-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}.md`;
+  const blob = new Blob([markdown], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fname; document.body.appendChild(a); a.click();
+  a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  // Also copy to clipboard for a quick paste to an agent.
+  try {
+    await navigator.clipboard.writeText(markdown);
+    flashExportMsg(`Copied to clipboard & saved ${fname}`);
+  } catch (e) {
+    flashExportMsg(`Saved ${fname}`);
+  }
+});
 
 // ---- auto-load latest CSV when served via serve.py ----
 (async function tryAutoLoad() {
