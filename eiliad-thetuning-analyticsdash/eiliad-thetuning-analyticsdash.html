@@ -470,6 +470,8 @@
     <div class="stat-card" title="Mean of every cohort user's task events per distinct chapter reached. Each user counts once, regardless of how much they played."><div class="label">Avg practice / chapter</div><div class="value" id="stat-practice-narrative">—</div></div>
     <div class="stat-card"><div class="label">Avg session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-len">—</div></div>
     <div class="stat-card"><div class="label">Median session</div><div class="value" style="font-size:20px;letter-spacing:-0.3px" id="stat-session-median">—</div></div>
+    <div class="stat-card" title="Share of chapter weekday-active users who formed a weekday routine — active ≥3 weekdays in a typical week ('same time of day' + 'varied times' combined, regardless of timing consistency)."><div class="label">Chapter habit</div><div class="value" id="stat-habit-chapters">—</div></div>
+    <div class="stat-card" title="Share of activity weekday-active users who formed a weekday routine — active ≥3 weekdays in a typical week ('same time of day' + 'varied times' combined, regardless of timing consistency)."><div class="label">Activity habit</div><div class="value" id="stat-habit-activities">—</div></div>
   </div>
 
   <!-- Export bar -->
@@ -718,7 +720,7 @@
       <div class="charts-grid">
         <div class="chart-card" style="grid-column: 1 / -1;">
           <h3>Habit-Forming Users</h3>
-          <p class="sub">Users split by weekday routine. “Same time of day” = shows up on ≥<span class="habit-wd-val">3</span> weekdays in a typical week AND their start time stays within a <span class="habit-win-val">~4h</span> spread. “Varied times” = shows up enough but the time drifts. “Too infrequent” = fewer than <span class="habit-wd-val">3</span> weekdays in a typical week. Hover for the share that formed a time habit</p>
+          <p class="sub">Users split by weekday routine. “Same time of day” = shows up on ≥<span class="habit-wd-val">3</span> weekdays in a typical week AND their start time stays within a <span class="habit-win-val">~4h</span> spread. “Varied times” = shows up enough but the time drifts. “Too infrequent” = fewer than <span class="habit-wd-val">3</span> weekdays in a typical week. Each bar is one content type; the three segments sum to that type’s weekday-active users — hover a segment for its count and % of that total</p>
           <div class="chart-wrap" style="height:300px;"><canvas id="chart-habit-summary"></canvas></div>
         </div>
         <div class="chart-card" style="grid-column: 1 / -1;">
@@ -4034,8 +4036,25 @@ function renderMultiBar(canvasId, labels, datasets, yLabel, opts = {}) {
           backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
           titleColor: '#e2e8f0', bodyColor: '#94a3b8',
           callbacks: {
-            label: c => ` ${c.dataset.label}: ${c.parsed.y.toLocaleString()} ${yLabel}`,
-            ...(opts.footer ? { footer: opts.footer } : {}),
+            // pctMode 'column' → % of the stacked column total (composition, sums to 100%).
+            // pctMode 'series' → % of that series' own total across the axis (a distribution).
+            label: c => {
+              const v = c.parsed.y || 0;
+              if (!opts.pctMode) return ` ${c.dataset.label}: ${v.toLocaleString()} ${yLabel}`;
+              const denom = opts.pctMode === 'column'
+                ? c.chart.data.datasets.reduce((s, d) => s + (Number(d.data[c.dataIndex]) || 0), 0)
+                : (c.dataset.data || []).reduce((s, x) => s + (Number(x) || 0), 0);
+              const pct = denom ? Math.round(v / denom * 100) : 0;
+              return ` ${c.dataset.label}: ${v.toLocaleString()} ${yLabel} (${pct}%)`;
+            },
+            // For a stacked composition, spell out the denominator so the %s are unambiguous.
+            ...(opts.pctMode === 'column' ? {
+              footer: items => {
+                const i = items[0].dataIndex;
+                const total = items[0].chart.data.datasets.reduce((s, d) => s + (Number(d.data[i]) || 0), 0);
+                return `${total.toLocaleString()} ${yLabel} total (100%)`;
+              }
+            } : {})
           }
         }
       },
@@ -4063,6 +4082,18 @@ function habitSplit(profiles) {
 function renderHabitSummary() {
   const ch = habitSplit(computeTimingHabit(chapterStartRows()));
   const ac = habitSplit(computeTimingHabit(activityStartRows()));
+
+  // Headline: users who formed a weekday routine = same-time + varied-time
+  // (everyone frequent enough, regardless of timing consistency).
+  const setHabitStat = (id, s) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const formed = s.same + s.varied;
+    el.textContent = s.total ? `${Math.round(formed / s.total * 100)}%` : '—';
+  };
+  setHabitStat('stat-habit-chapters', ch);
+  setHabitStat('stat-habit-activities', ac);
+
   renderMultiBar('chart-habit-summary',
     ['Chapters', 'Activities'],
     [
@@ -4071,16 +4102,7 @@ function renderHabitSummary() {
       { label: 'Too infrequent (<3 weekdays)', data: [ch.infrequent, ac.infrequent], color: '#475569' },
     ],
     'users',
-    {
-      stacked: true,
-      footer: items => {
-        const i = items[0].dataIndex;
-        const cols3 = charts['chart-habit-summary'].data.datasets;
-        const total = cols3.reduce((s, d) => s + (d.data[i] || 0), 0);
-        const same = cols3[0].data[i] || 0;
-        return total ? `${(same / total * 100).toFixed(0)}% formed a time habit (of ${total} users)` : '';
-      }
-    });
+    { stacked: true, pctMode: 'column' });
 }
 
 const HABIT_SPREAD_BINS = [1, 2, 3, 4];               // hour edges
@@ -4104,7 +4126,8 @@ function renderHabitSpread() {
       { label: 'Chapters',   data: ch, color: PALETTE[0] },
       { label: 'Activities', data: ac, color: PALETTE[1] },
     ],
-    'users');
+    'users',
+    { pctMode: 'series' });
 }
 
 function renderHabitClock() {
