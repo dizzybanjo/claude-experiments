@@ -445,6 +445,14 @@
       <label title="Drives the AVERAGE SESSION DURATION and MEDIAN SESSION DURATION charts. Sessions longer than this are dropped. Default 360 (6h) keeps genuine long nature walks and deep listens, while excluding the 11-18h pairs left behind by missing end events. Set 0 for no cap.">Max session — average (mins)</label>
       <input type="number" id="filter-max-duration-avg" min="0" step="1" value="360" placeholder="0 = no cap">
     </div>
+    <div class="field-group" style="max-width:180px; flex:0 1 180px;">
+      <label title="Habits section only. A user counts as keeping the 'same time of day' when their weekday start times cluster within this many hours (circular spread, so late-night and early-morning count as close). Wider = more users qualify as habitual.">Habit time window (hours)</label>
+      <input type="number" id="filter-habit-window" min="0.5" step="0.5" value="4">
+    </div>
+    <div class="field-group" style="max-width:200px; flex:0 1 200px;">
+      <label title="Habits section only. A user must be active on at least this many weekdays (Mon–Fri) in a typical (median) week to be eligible as habitual. Weekends are ignored. Max 5.">Habit min weekdays / week</label>
+      <input type="number" id="filter-habit-weekdays" min="1" max="5" step="1" value="3">
+    </div>
     <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never entered the story (no chapter events at all). A missing chapter 1 doesn't count against a user — that event can simply have been lost.">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
@@ -697,6 +705,31 @@
           <h3>Time of Day — All Usage</h3>
           <p class="sub">Total app events per hour of day (all activity)</p>
           <div class="chart-wrap" style="height:280px;"><canvas id="chart-overall-tod"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Habits -->
+    <div class="charts-section">
+      <div class="section-header">
+        <span class="section-title">Habits</span>
+        <span class="section-tags">do users return at the same time on weekdays? · weekends excluded (people are busier) · anchor = first session each weekday · habit = ≥<span class="habit-wd-val">3</span> weekdays in a typical week, at a consistent time (within a <span class="habit-win-val">~4h</span> spread) · set both in the filters bar</span>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Habit-Forming Users</h3>
+          <p class="sub">Users split by weekday routine. “Same time of day” = shows up on ≥<span class="habit-wd-val">3</span> weekdays in a typical week AND their start time stays within a <span class="habit-win-val">~4h</span> spread. “Varied times” = shows up enough but the time drifts. “Too infrequent” = fewer than <span class="habit-wd-val">3</span> weekdays in a typical week. Hover for the share that formed a time habit</p>
+          <div class="chart-wrap" style="height:300px;"><canvas id="chart-habit-summary"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>Timing Consistency — Distribution</h3>
+          <p class="sub">Among users active ≥<span class="habit-wd-val">3</span> weekdays in a typical week, the spread of their weekday start times — tighter (left) is a stronger habit. Users within the <span class="habit-win-val">~4h</span> window count as habitual above</p>
+          <div class="chart-wrap" style="height:300px;"><canvas id="chart-habit-spread"></canvas></div>
+        </div>
+        <div class="chart-card" style="grid-column: 1 / -1;">
+          <h3>When the Habit Happens</h3>
+          <p class="sub">For habitual users only, the personal time of day their weekday sessions cluster around — where the routines sit across the clock</p>
+          <div class="chart-wrap" style="height:320px;"><canvas id="chart-habit-clock"></canvas></div>
         </div>
       </div>
     </div>
@@ -1484,6 +1517,8 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   document.getElementById('filter-ambient-min').value = String(AMBIENT_MIN_LISTEN_DEFAULT);
   document.getElementById('filter-max-duration').value = String(TOTAL_TIME_MAX_DEFAULT);
   document.getElementById('filter-max-duration-avg').value = String(AVG_DURATION_MAX_DEFAULT);
+  document.getElementById('filter-habit-window').value = String(HABIT_SPREAD_HOURS_DEFAULT);
+  document.getElementById('filter-habit-weekdays').value = String(HABIT_MIN_WEEKDAYS_DEFAULT);
   applyFilters();
 });
 
@@ -1576,6 +1611,11 @@ document.getElementById('filter-ambient-min').addEventListener('change', applyFi
 document.getElementById('filter-max-duration').addEventListener('change', applyFilters);
 document.getElementById('filter-max-duration-avg').addEventListener('change', applyFilters);
 
+// Habit thresholds only touch the Habits section — re-render just those charts, live.
+['filter-habit-window', 'filter-habit-weekdays'].forEach(id => {
+  document.getElementById(id).addEventListener('change', renderHabits);
+});
+
 function applyFilters() {
   // Always recompute detected cheats from the full raw dataset
   detectedCheats = detectCheatUsers(rawData);
@@ -1649,6 +1689,8 @@ function applyFilters() {
   renderReplayEngagement();
   renderOverallTimeOfDay();
   renderResonanceOverTime();
+  // habits
+  renderHabits();
   // streaks
   renderStreaks();
   // sessions
@@ -3874,6 +3916,231 @@ function renderChapterTimeOfDay() {
   renderMultiLineTimeChart('chart-chap-time-of-day', datasets, 'events');
 }
 
+// ===================== Habits =====================
+// A habit = returning at the same time of day on weekdays. Weekends are excluded
+// (routines loosen when people are busier). We take each weekday's FIRST session as
+// that day's anchor time, then judge two things per user:
+//   frequency — in a typical (median) active week, are they on ≥3 of the 5 weekdays?
+//   timing    — do those anchor times cluster within a ~3h spread?  (circular stats,
+//               so 11pm and 1am count as close rather than a whole day apart)
+// habitual = frequent AND spread ≤ the time window.
+// Both thresholds are user-settable in the filters bar; these are the fallbacks.
+const HABIT_MIN_WEEKDAYS_DEFAULT = 3;   // distinct Mon–Fri days in a typical (median) active week
+const HABIT_SPREAD_HOURS_DEFAULT = 4;   // weekday start times must sit within ~this many hours
+
+function habitMinWeekdays() {
+  const v = parseFloat(document.getElementById('filter-habit-weekdays')?.value);
+  return Number.isFinite(v) && v >= 1 ? v : HABIT_MIN_WEEKDAYS_DEFAULT;
+}
+function habitSpreadHours() {
+  const v = parseFloat(document.getElementById('filter-habit-window')?.value);
+  return Number.isFinite(v) && v > 0 ? v : HABIT_SPREAD_HOURS_DEFAULT;
+}
+
+function computeTimingHabit(rows) {
+  const minWeekdays = habitMinWeekdays();
+  // user -> (weekday date -> earliest datetime that day)
+  const byUser = new Map();
+  rows.forEach(r => {
+    const u = r[cols.user];
+    if (!u) return;
+    const dt = parseDate(r[cols.datetime]);
+    if (!dt) return;
+    const dow = dt.getDay();                  // 0=Sun … 6=Sat
+    if (dow === 0 || dow === 6) return;       // weekdays only
+    const dayKey = `${dt.getFullYear()}-${dt.getMonth()}-${dt.getDate()}`;
+    let days = byUser.get(u);
+    if (!days) { days = new Map(); byUser.set(u, days); }
+    const prev = days.get(dayKey);
+    if (!prev || dt < prev) days.set(dayKey, dt);
+  });
+
+  const profiles = [];
+  byUser.forEach((days, user) => {
+    const anchors = [...days.values()];
+    if (!anchors.length) return;
+
+    // distinct weekdays active, grouped by that week's Monday
+    const perWeek = new Map();
+    anchors.forEach(dt => {
+      const monday = new Date(dt);
+      monday.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+      const wk = `${monday.getFullYear()}-${monday.getMonth()}-${monday.getDate()}`;
+      let set = perWeek.get(wk);
+      if (!set) { set = new Set(); perWeek.set(wk, set); }
+      set.add(dt.getDay());
+    });
+    const counts = [...perWeek.values()].map(s => s.size).sort((a, b) => a - b);
+    const mid = Math.floor(counts.length / 2);
+    const medWeekdays = counts.length % 2
+      ? counts[mid]
+      : (counts[mid - 1] + counts[mid]) / 2;
+    const frequent = medWeekdays >= minWeekdays;
+
+    // circular spread of the anchor times-of-day
+    let sc = 0, ss = 0;
+    anchors.forEach(dt => {
+      const ang = (dt.getHours() + dt.getMinutes() / 60 + dt.getSeconds() / 3600) * Math.PI / 12;
+      sc += Math.cos(ang); ss += Math.sin(ang);
+    });
+    const n = anchors.length;
+    const R = Math.min(Math.max(Math.sqrt(sc * sc + ss * ss) / n, 1e-6), 1);
+    const spreadHours = Math.sqrt(-2 * Math.log(R)) * 12 / Math.PI;  // circular std → hours
+    let ang = Math.atan2(ss, sc); if (ang < 0) ang += 2 * Math.PI;
+    const prefHour = ang * 12 / Math.PI;                            // 0–24
+
+    profiles.push({ user, medWeekdays, frequent, spreadHours, prefHour, anchors: n });
+  });
+  return profiles;
+}
+
+function chapterStartRows() {
+  return filteredData.filter(r =>
+    (r[cols.type] || '').toLowerCase().includes('chapter') &&
+    isStartAction(r[cols.action] || ''));
+}
+function activityStartRows() {
+  return activityRows.filter(r => {
+    if (!(r[cols.type] || '').toLowerCase().includes('task')) return false;
+    if (!isStartAction(r[cols.action] || '')) return false;
+    const entity = (r[cols.entity] || '').toLowerCase();
+    return ACTIVITIES.some(a => entity.includes(a));
+  });
+}
+
+// Grouped/stacked multi-dataset bar in the dashboard house style.
+function renderMultiBar(canvasId, labels, datasets, yLabel, opts = {}) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const ds = datasets.map(d => ({
+    label: d.label,
+    data: d.data,
+    backgroundColor: d.color + 'cc',
+    borderColor: d.color,
+    borderWidth: 1.5,
+    borderRadius: 6,
+    borderSkipped: false,
+  }));
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: ds },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, labels: { color: '#e2e8f0', font: { size: 12 }, boxWidth: 12, padding: 16 } },
+        tooltip: {
+          backgroundColor: '#1a1d27', borderColor: '#2e3248', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+          callbacks: {
+            label: c => ` ${c.dataset.label}: ${c.parsed.y.toLocaleString()} ${yLabel}`,
+            ...(opts.footer ? { footer: opts.footer } : {}),
+          }
+        }
+      },
+      scales: {
+        x: { stacked: !!opts.stacked, ticks: { color: '#64748b', font: { size: 12 } }, grid: { color: '#1e2235' } },
+        y: { stacked: !!opts.stacked, beginAtZero: true, ticks: { color: '#64748b', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+          title: { display: true, text: yLabel, color: '#475569', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function habitSplit(profiles) {
+  const window = habitSpreadHours();
+  let same = 0, varied = 0, infrequent = 0;
+  profiles.forEach(p => {
+    if (!p.frequent) infrequent++;
+    else if (p.spreadHours <= window) same++;
+    else varied++;
+  });
+  return { same, varied, infrequent, total: profiles.length };
+}
+
+function renderHabitSummary() {
+  const ch = habitSplit(computeTimingHabit(chapterStartRows()));
+  const ac = habitSplit(computeTimingHabit(activityStartRows()));
+  renderMultiBar('chart-habit-summary',
+    ['Chapters', 'Activities'],
+    [
+      { label: 'Same time of day (habit)', data: [ch.same, ac.same], color: '#34d399' },
+      { label: 'Varied times',             data: [ch.varied, ac.varied], color: '#fbbf24' },
+      { label: 'Too infrequent (<3 weekdays)', data: [ch.infrequent, ac.infrequent], color: '#475569' },
+    ],
+    'users',
+    {
+      stacked: true,
+      footer: items => {
+        const i = items[0].dataIndex;
+        const cols3 = charts['chart-habit-summary'].data.datasets;
+        const total = cols3.reduce((s, d) => s + (d.data[i] || 0), 0);
+        const same = cols3[0].data[i] || 0;
+        return total ? `${(same / total * 100).toFixed(0)}% formed a time habit (of ${total} users)` : '';
+      }
+    });
+}
+
+const HABIT_SPREAD_BINS = [1, 2, 3, 4];               // hour edges
+const HABIT_SPREAD_LABELS = ['≤1h', '1–2h', '2–3h', '3–4h', '4h+'];
+function spreadHistogram(profiles) {
+  const bins = new Array(HABIT_SPREAD_LABELS.length).fill(0);
+  profiles.filter(p => p.frequent).forEach(p => {
+    let idx = HABIT_SPREAD_BINS.findIndex(edge => p.spreadHours <= edge);
+    if (idx === -1) idx = HABIT_SPREAD_LABELS.length - 1;
+    bins[idx]++;
+  });
+  return bins;
+}
+
+function renderHabitSpread() {
+  const ch = spreadHistogram(computeTimingHabit(chapterStartRows()));
+  const ac = spreadHistogram(computeTimingHabit(activityStartRows()));
+  renderMultiBar('chart-habit-spread',
+    HABIT_SPREAD_LABELS,
+    [
+      { label: 'Chapters',   data: ch, color: PALETTE[0] },
+      { label: 'Activities', data: ac, color: PALETTE[1] },
+    ],
+    'users');
+}
+
+function renderHabitClock() {
+  const window = habitSpreadHours();
+  const clock = profiles => {
+    const hours = new Array(24).fill(0);
+    profiles.filter(p => p.frequent && p.spreadHours <= window)
+      .forEach(p => { hours[Math.floor(p.prefHour) % 24]++; });
+    return hours;
+  };
+  const chData = clock(computeTimingHabit(chapterStartRows()));
+  const acData = clock(computeTimingHabit(activityStartRows()));
+  const mk = (label, data, color) => ({
+    label, data,
+    borderColor: color, backgroundColor: color + '22',
+    borderWidth: 2, pointRadius: 3, pointHoverRadius: 6, fill: false, tension: 0.3,
+  });
+  renderMultiLineTimeChart('chart-habit-clock',
+    [mk('Chapters', chData, PALETTE[0]), mk('Activities', acData, PALETTE[1])],
+    'habitual users');
+}
+
+// Reflect the current threshold settings in the section's descriptive text.
+function updateHabitLabels() {
+  const wd = habitMinWeekdays(), win = habitSpreadHours();
+  document.querySelectorAll('.habit-wd-val').forEach(e => { e.textContent = wd; });
+  document.querySelectorAll('.habit-win-val').forEach(e => { e.textContent = `~${win}h`; });
+}
+
+function renderHabits() {
+  updateHabitLabels();
+  renderHabitSummary();
+  renderHabitSpread();
+  renderHabitClock();
+}
+
 // ---- chart helper ----
 function renderLineChart(canvasId, labels, data, color, yLabel, opts = {}) {
   destroyChart(canvasId);
@@ -4958,6 +5225,8 @@ function exportFilterLines() {
   push('Min deep listen (secs)', g('filter-ambient-min')?.value);
   push('Max session — total (mins)', g('filter-max-duration')?.value);
   push('Max session — average (mins)', g('filter-max-duration-avg')?.value);
+  push('Habit time window (hours)', g('filter-habit-window')?.value);
+  push('Habit min weekdays / week', g('filter-habit-weekdays')?.value);
   const toggle = (id, name) => { const b = g(id); if (b && b.classList.contains('active')) out.push(`- **${name}:** on`); };
   toggle('filter-engagement-btn', 'Min Engagement filter');
   toggle('filter-alpha-btn', 'Alpha Users cohort');
