@@ -576,7 +576,7 @@
       <div class="charts-grid">
         <div class="chart-card">
           <h3>Activities per Day — Distribution</h3>
-          <p class="sub">Each user's rate = activity sessions started ÷ days from their first to last activity (span floored at 1 day). Across all users — mean <b><span id="act-vel-day-mean">—</span></b>, median <b><span id="act-vel-day-median">—</span></b> per day</p>
+          <p class="sub">Each user's rate = activity sessions started ÷ days from their first to last activity (span floored at 1 day). Users who logged no activity count as 0. Across all users — mean <b><span id="act-vel-day-mean">—</span></b>, median <b><span id="act-vel-day-median">—</span></b> per day</p>
           <div class="chart-wrap"><canvas id="chart-act-vel-day"></canvas></div>
         </div>
         <div class="chart-card">
@@ -2077,19 +2077,27 @@ function renderStallPoint() {
 // 1 day; the weekly rate is the same figure × 7.
 function computeUserActivityRates() {
   const rec = {};
+  // Seed every user in the cohort at zero. Someone who logged no activity at all
+  // still has a rate — it's 0/day — and belongs in the bottom bin. Building the
+  // map from the activity rows alone dropped them from the denominator, so the
+  // histogram's "% of users" was over a smaller population than the user count
+  // in the header (e.g. 4 of 14 practisers showing as 28.6% of a 20-user cohort).
+  new Set(filteredData.map(r => r[cols.user]).filter(Boolean))
+    .forEach(u => { rec[u] = { first: null, last: null, count: 0 }; });
+
   activityRows.forEach(r => {
     if (!(r[cols.type] || '').toLowerCase().includes('task')) return;
     if (!isStartAction(r[cols.action] || '')) return;
     const user = r[cols.user];
     const dt = parseDate(r[cols.datetime]);
     if (!user || !dt) return;
-    const e = rec[user] || (rec[user] = { first: dt, last: dt, count: 0 });
-    if (dt < e.first) e.first = dt;
-    if (dt > e.last)  e.last  = dt;
+    const e = rec[user] || (rec[user] = { first: null, last: null, count: 0 });
+    if (!e.first || dt < e.first) e.first = dt;
+    if (!e.last  || dt > e.last)  e.last  = dt;
     e.count++;
   });
   return Object.entries(rec).map(([user, e]) => {
-    const spanDays = (e.last - e.first) / 86400000;
+    const spanDays = e.first ? (e.last - e.first) / 86400000 : 0;
     const perDay   = e.count / Math.max(spanDays, 1);
     return { user, count: e.count, spanDays, perDay, perWeek: perDay * 7 };
   });
