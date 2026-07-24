@@ -449,6 +449,10 @@
       <label title="Habits section only. A user must be active on at least this many weekdays (Mon–Fri) in a typical (median) week to be eligible as habitual. Weekends are ignored. Max 5.">Habit min weekdays / week</label>
       <input type="number" id="filter-habit-weekdays" min="1" max="5" step="1" value="3">
     </div>
+    <div class="field-group" style="max-width:180px; flex:0 1 180px;">
+      <label title="Min Engagement filter only. Exclude users whose total app engagement time is below this many minutes. Default 2. Set 0 to only exclude users who never entered the story.">Min engagement (mins)</label>
+      <input type="number" id="filter-min-engagement-mins" min="0" step="1" value="2">
+    </div>
     <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never entered the story (no chapter events at all). A missing chapter 1 doesn't count against a user — that event can simply have been lost.">Min Engagement</button>
     <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
@@ -1347,7 +1351,8 @@ function getExcludedUsers() {
   // or not the event survived.
   engagementExcludedCount = 0;
   if (filterMinEngagement) {
-    const thresh = 2;
+    const threshInput = parseFloat(document.getElementById('filter-min-engagement-mins').value);
+    const thresh = isNaN(threshInput) ? 0 : threshInput;
     const totals = computeUserEngagementMins(rawData);
     const storyUsers = new Set();
     rawData.forEach(r => {
@@ -1511,6 +1516,7 @@ document.getElementById('filter-reset-btn').addEventListener('click', () => {
   document.getElementById('filter-alpha-btn').classList.remove('active');
   filterMinEngagement = true;
   document.getElementById('filter-engagement-btn').classList.add('active');
+  document.getElementById('filter-min-engagement-mins').value = String(MIN_ENGAGEMENT_MINS_DEFAULT);
   document.getElementById('filter-ambient-min').value = String(AMBIENT_MIN_LISTEN_DEFAULT);
   document.getElementById('filter-max-duration').value = String(TOTAL_TIME_MAX_DEFAULT);
   document.getElementById('filter-max-duration-avg').value = String(AVG_DURATION_MAX_DEFAULT);
@@ -2726,6 +2732,7 @@ function renderChapterResonanceSurplus() {
 // it, staying in ambient is taken as deliberate passive use. Set in the UI,
 // since where the handoff ends and the choice begins is a judgement call.
 const AMBIENT_MIN_LISTEN_DEFAULT = 5;
+const MIN_ENGAGEMENT_MINS_DEFAULT = 2;  // Min Engagement filter threshold, overridable in the UI
 
 function getAmbientMinListenMs() {
   const el = document.getElementById('filter-ambient-min');
@@ -5235,7 +5242,7 @@ function exportFilterLines() {
   push('Excluded users', tagText('excl-user-tags'));
   push('Show only users', tagText('include-user-tags'));
   push('Replay pairs', tagText('replay-user-tags'));
-  push('Min engagement (mins)', '2');
+  push('Min engagement (mins)', g('filter-min-engagement-mins')?.value);
   push('Min deep listen (secs)', g('filter-ambient-min')?.value);
   push('Max session — total (mins)', g('filter-max-duration')?.value);
   push('Max session — average (mins)', g('filter-max-duration-avg')?.value);
