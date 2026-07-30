@@ -444,7 +444,7 @@
       <div id="replay-user-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
     </div>
     <div class="field-group" style="flex-basis:100%; margin-top:4px; padding-top:12px; border-top:1px solid var(--border);">
-      <label>Cohort: ALPHA TESTERS &mdash; include only users registered after</label>
+      <label>Cohort: ALPHA 1 &mdash; include only users registered after</label>
     </div>
     <div class="field-group">
       <label>Registered after</label>
@@ -475,7 +475,7 @@
       <input type="number" id="filter-min-engagement-mins" min="0" step="1" value="2">
     </div>
     <button class="btn btn-engage active" id="filter-engagement-btn" title="Exclude users whose total app engagement time is below the set number of minutes, or who never entered the story (no chapter events at all). A missing chapter 1 doesn't count against a user — that event can simply have been lost.">Min Engagement</button>
-    <button class="btn btn-alpha" id="filter-alpha-btn">Alpha Users</button>
+    <button class="btn btn-alpha active" id="filter-alpha-btn" title="The Alpha 1 cohort: every filter back to its default, the date range pinned to 22 Jun – 22 Jul 2026, and only users registered after the alpha launch. On by default.">Alpha 1 cohort</button>
     <button class="btn btn-cheat active" id="filter-cheat-btn">Filter Cheat/Dev</button>
     <button class="btn btn-quality active" id="filter-quality-btn" title="Exclude sessions starting at ≥95 resonance or lasting under 60s">Quality Sessions</button>
     <button class="btn btn-ghost" id="filter-apply-btn">Apply filters</button>
@@ -926,7 +926,7 @@ let filteredData = [];
 let charts = {};
 let sessionData = [];
 let activityRows = [];
-let filterAlpha = false;
+let filterAlpha = true;   // Alpha 1 cohort is the default view
 let filterCheatDev = true;
 let detectedCheats = new Set();
 let filterQualitySessions = true;
@@ -1135,7 +1135,7 @@ function handleFile(file) {
     rawData = rows;
     showBadge(file.name, rawData.length);
     setupFilters();
-    document.getElementById('filter-alpha-btn').click();
+    setAlphaCohort(true);   // Alpha 1 cohort is the default view on load
     document.getElementById('filters-bar').classList.add('visible');
     document.getElementById('stats-row').classList.add('visible');
     document.getElementById('charts-wrapper').classList.add('visible');
@@ -1562,46 +1562,81 @@ document.getElementById('filter-replay-input').addEventListener('keydown', e => 
   if (e.key === 'Enter') { e.preventDefault(); addReplayUser(e.target.value.trim()); }
 });
 
-document.getElementById('filter-alpha-btn').addEventListener('click', () => {
-  filterAlpha = !filterAlpha;
+// ---- Alpha 1 cohort ----
+// The alpha test window: users registered after launch, looked at over the
+// month the test ran, with every other filter sitting at its default.
+const ALPHA_COHORT_AFTER = '2026-06-22T15:00';
+const ALPHA_FROM_DATE    = '2026-06-22';
+const ALPHA_TO_DATE      = '2026-07-22';
+
+// Every filter that has a default, back to it. Shared by the Alpha 1 cohort
+// button and Reset, so the two can't drift apart.
+function applyDefaultFilterSettings() {
+  document.getElementById('filter-user').value      = '';
+  document.getElementById('filter-type').value      = '';
+  document.getElementById('filter-excl-from').value = '';
+  document.getElementById('filter-excl-to').value   = '';
+  document.getElementById('filter-min-engagement-mins').value = String(MIN_ENGAGEMENT_MINS_DEFAULT);
+  document.getElementById('filter-ambient-min').value         = String(AMBIENT_MIN_LISTEN_DEFAULT);
+  document.getElementById('filter-max-duration').value        = String(TOTAL_TIME_MAX_DEFAULT);
+  document.getElementById('filter-max-duration-avg').value    = String(AVG_DURATION_MAX_DEFAULT);
+  document.getElementById('filter-habit-window').value        = String(HABIT_SPREAD_HOURS_DEFAULT);
+  document.getElementById('filter-habit-weekdays').value      = String(HABIT_MIN_WEEKDAYS_DEFAULT);
+
+  filterMinEngagement = true;
+  document.getElementById('filter-engagement-btn').classList.add('active');
+  filterCheatDev = true;
+  document.getElementById('filter-cheat-btn').classList.add('active');
+  filterQualitySessions = true;
+  document.getElementById('filter-quality-btn').classList.add('active');
+
+  includeOnlyUsers.clear();
+  saveIncludeUsers();
+  renderIncludeTags();
+}
+
+// Widest span the loaded CSV covers — what the date range falls back to when
+// the cohort is switched off.
+function setDateRangeToData() {
+  if (!cols.datetime || !rawData.length) return;
+  const dates = rawData.map(r => parseDate(r[cols.datetime])).filter(Boolean).sort((a,b) => a-b);
+  if (!dates.length) return;
+  document.getElementById('filter-from').value = fmtDateInput(dates[0]);
+  document.getElementById('filter-to').value   = fmtDateInput(dates[dates.length-1]);
+}
+
+function setAlphaCohort(on) {
+  filterAlpha = on;
   document.getElementById('filter-alpha-btn').classList.toggle('active', filterAlpha);
   if (filterAlpha) {
-    document.getElementById('filter-cohort-after').value = '2026-06-22T15:00';
+    applyDefaultFilterSettings();
+    document.getElementById('filter-from').value         = ALPHA_FROM_DATE;
+    document.getElementById('filter-to').value           = ALPHA_TO_DATE;
+    document.getElementById('filter-cohort-after').value = ALPHA_COHORT_AFTER;
     specificExclUsers.add('USER-ECDMKD');
   } else {
     document.getElementById('filter-cohort-after').value = '';
     specificExclUsers.delete('USER-ECDMKD');
+    setDateRangeToData();
   }
   saveExclUsers();
   renderExclTags();
   applyFilters();
-});
+}
+
+document.getElementById('filter-alpha-btn').addEventListener('click', () => setAlphaCohort(!filterAlpha));
 
 document.getElementById('filter-apply-btn').addEventListener('click', applyFilters);
 document.getElementById('filter-reset-btn').addEventListener('click', () => {
+  applyDefaultFilterSettings();
   document.getElementById('filter-from').value         = '';
   document.getElementById('filter-to').value           = '';
-  document.getElementById('filter-user').value         = '';
-  document.getElementById('filter-type').value         = '';
-  document.getElementById('filter-excl-from').value    = '';
-  document.getElementById('filter-excl-to').value      = '';
   document.getElementById('filter-cohort-after').value = '';
   specificExclUsers.clear();
   saveExclUsers();
   renderExclTags();
-  includeOnlyUsers.clear();
-  saveIncludeUsers();
-  renderIncludeTags();
   filterAlpha = false;
   document.getElementById('filter-alpha-btn').classList.remove('active');
-  filterMinEngagement = true;
-  document.getElementById('filter-engagement-btn').classList.add('active');
-  document.getElementById('filter-min-engagement-mins').value = String(MIN_ENGAGEMENT_MINS_DEFAULT);
-  document.getElementById('filter-ambient-min').value = String(AMBIENT_MIN_LISTEN_DEFAULT);
-  document.getElementById('filter-max-duration').value = String(TOTAL_TIME_MAX_DEFAULT);
-  document.getElementById('filter-max-duration-avg').value = String(AVG_DURATION_MAX_DEFAULT);
-  document.getElementById('filter-habit-window').value = String(HABIT_SPREAD_HOURS_DEFAULT);
-  document.getElementById('filter-habit-weekdays').value = String(HABIT_MIN_WEEKDAYS_DEFAULT);
   applyFilters();
 });
 
@@ -5338,7 +5373,7 @@ function exportFilterLines() {
   push('Habit min weekdays / week', g('filter-habit-weekdays')?.value);
   const toggle = (id, name) => { const b = g(id); if (b && b.classList.contains('active')) out.push(`- **${name}:** on`); };
   toggle('filter-engagement-btn', 'Min Engagement filter');
-  toggle('filter-alpha-btn', 'Alpha Users cohort');
+  toggle('filter-alpha-btn', 'Alpha 1 cohort');
   toggle('filter-cheat-btn', 'Filter Cheat/Dev');
   toggle('filter-quality-btn', 'Quality Sessions filter');
   return out;
